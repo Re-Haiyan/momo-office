@@ -161,11 +161,68 @@ const mock = http.createServer(async (req, res) => {
     0,
   );
   assert.equal(await page.getByRole("textbox").count(), 1);
+  await page.waitForFunction(
+    () => document.querySelector("canvas")?.dataset.agentCount === "8",
+  );
+  const canvas = page.locator("canvas");
+  assert.equal(await canvas.getAttribute("data-pixel-art"), "true");
+  assert.equal(await canvas.getAttribute("data-round-pixels"), "true");
+  assert.equal(await canvas.getAttribute("data-floor-cached"), "true");
+  const colors = await canvas.evaluate((c) => {
+    const d = c.getContext("2d").getImageData(0, 0, 960, 640).data;
+    const colors = new Set();
+    for (let i = 0; i < d.length; i += 124)
+      colors.add(`${d[i]},${d[i + 1]},${d[i + 2]}`);
+    return colors.size;
+  });
+  assert.ok(
+    colors > 30,
+    "The pixel office must contain rendered art, not a blank canvas.",
+  );
+  assert.equal(await canvas.evaluate((c) => c.width), 960);
+  assert.equal(await canvas.evaluate((c) => c.height), 640);
+  assert.equal(await canvas.getAttribute("data-zoom"), "1");
+  assert.equal(
+    await page.locator("html").getAttribute("data-audio-started"),
+    "false",
+  );
+  const gameBox = await canvas.boundingBox();
+  await page.mouse.click(
+    gameBox.x + (448 * gameBox.width) / 960,
+    gameBox.y + (152 * gameBox.height) / 640,
+  );
+  await page
+    .getByRole("dialog", { name: "Talk with Momo", exact: true })
+    .waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "View output", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await page.getByRole("button", { name: "Change model", exact: true }).click();
+  await page.getByLabel("Name", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByLabel("Name", { exact: true }).inputValue(),
+    "Momo",
+  );
+  await page
+    .getByRole("button", { name: "Close settings", exact: true })
+    .click();
+  await canvas.focus();
+  await page.keyboard.press("+");
+  assert.equal(await canvas.getAttribute("data-zoom"), "2");
+  await page.keyboard.press("0");
+  assert.equal(await canvas.getAttribute("data-zoom"), "1");
+  await page.mouse.move(gameBox.x + 500, gameBox.y + 200);
+  await page.mouse.wheel(0, -120);
+  await page.waitForTimeout(120);
+  assert.equal(await canvas.getAttribute("data-zoom"), "2");
+  await canvas.focus();
+  await page.keyboard.press("0");
   await page.screenshot({ path: path.join(screenshots, "Momo-Office.png") });
   await page.getByRole("button", { name: "Open settings" }).click();
-  await page
-    .getByRole("button", { name: "Skills", exact: true })
-    .click();
+  await page.getByRole("tab", { name: "Skills", exact: true }).click();
   await page.getByRole("button", { name: "+ Add skill", exact: true }).click();
   await page.getByLabel("Skill name", { exact: true }).fill("Brand voice");
   await page
@@ -173,7 +230,7 @@ const mock = http.createServer(async (req, res) => {
     .fill("Use a friendly and concise voice.");
   await page.getByRole("button", { name: "Save skill", exact: true }).click();
   await page.getByRole("button", { name: /Brand voice/ }).waitFor();
-  await page.getByRole("button", { name: "Teammates", exact: true }).click();
+  await page.getByRole("tab", { name: "Teammates", exact: true }).click();
   await page.getByRole("button", { name: "+ Add agent", exact: true }).click();
   await page.getByLabel("Name", { exact: true }).fill("Kiki");
   await page.getByLabel("Role", { exact: true }).fill("Designer");
@@ -185,6 +242,16 @@ const mock = http.createServer(async (req, res) => {
     .getByRole("button", { name: "Save teammate", exact: true })
     .click();
   await page.getByRole("button", { name: /Kiki/ }).waitFor();
+  await page.getByRole("button", { name: "+ Add agent", exact: true }).click();
+  await page.getByLabel("Name", { exact: true }).fill("Nori");
+  await page.getByLabel("Role", { exact: true }).fill("Editor");
+  await page
+    .getByRole("button", { name: "Save teammate", exact: true })
+    .click();
+  await page.getByRole("button", { name: /Nori/ }).waitFor();
+  await page.waitForFunction(
+    () => document.querySelector("canvas")?.dataset.agentCount === "10",
+  );
   await page.getByRole("button", { name: /Pip/ }).click();
   await page
     .getByLabel("Ollama model (optional)", { exact: true })
@@ -208,7 +275,7 @@ const mock = http.createServer(async (req, res) => {
   await page
     .getByRole("button", { name: "Discard preview", exact: true })
     .click();
-  await page.getByRole("button", { name: "Providers", exact: true }).click();
+  await page.getByRole("tab", { name: "Providers", exact: true }).click();
   await page
     .getByLabel("Enable this cloud provider", { exact: true })
     .first()
@@ -231,6 +298,99 @@ const mock = http.createServer(async (req, res) => {
     true,
   );
   await page.screenshot({ path: path.join(screenshots, "Providers.png") });
+  await page.getByRole("tab", { name: "Display", exact: true }).focus();
+  await page.keyboard.press("ArrowLeft");
+  assert.equal(
+    await page
+      .getByRole("tab", { name: "Models", exact: true })
+      .getAttribute("aria-selected"),
+    "true",
+  );
+  await page.keyboard.press("ArrowRight");
+  assert.equal(
+    await page
+      .getByRole("tab", { name: "Display", exact: true })
+      .getAttribute("aria-selected"),
+    "true",
+  );
+  await page.getByLabel("Weather", { exact: true }).selectOption("rain");
+  await page.waitForFunction(
+    () => document.querySelector("canvas")?.dataset.weatherActive === "true",
+  );
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.waitForFunction(
+    () => document.querySelector("canvas")?.dataset.weatherActive === "false",
+  );
+  await page
+    .getByText(
+      "Reduced motion is on. Weather and ambient animation are disabled.",
+      { exact: true },
+    )
+    .waitFor();
+  await page.getByLabel("Season", { exact: true }).selectOption("winter");
+  await page.waitForFunction(
+    () => document.querySelector("canvas")?.dataset.season === "winter",
+  );
+  await page.getByLabel("High-contrast panels", { exact: true }).check();
+  assert.equal(
+    await page.locator(".momo-app").getAttribute("data-high-contrast"),
+    "true",
+  );
+  await page.getByLabel("Pixel cursor", { exact: true }).uncheck();
+  assert.equal(
+    await page.locator("html").getAttribute("data-pixel-cursor"),
+    "false",
+  );
+  await page.getByLabel("Pixel cursor", { exact: true }).check();
+  await page.getByLabel("High-contrast panels", { exact: true }).uncheck();
+  assert.equal(
+    await page.getByLabel("Enable sound", { exact: true }).isChecked(),
+    false,
+  );
+  assert.equal(
+    await page.locator("html").getAttribute("data-audio-started"),
+    "false",
+  );
+  await page.getByLabel("Enable sound", { exact: true }).check();
+  await page.waitForFunction(
+    () => document.documentElement.dataset.audioStarted === "true",
+  );
+  await page.getByLabel("Enable sound", { exact: true }).uncheck();
+  await page.getByLabel("Weather", { exact: true }).selectOption("off");
+  await page.getByLabel("Season", { exact: true }).selectOption("auto");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.setViewportSize({ width: 760, height: 640 });
+  await page.getByLabel("UI scale", { exact: true }).selectOption("3");
+  assert.equal(
+    await page.locator(".momo-app").getAttribute("data-ui-scale"),
+    "3",
+  );
+  await page
+    .getByRole("button", { name: "Close settings", exact: true })
+    .click();
+  await page
+    .getByRole("textbox", { name: "Ask Momo" })
+    .scrollIntoViewIfNeeded();
+  let scaledBox = await page
+    .getByRole("textbox", { name: "Ask Momo" })
+    .boundingBox();
+  assert.ok(
+    scaledBox.x >= 0 &&
+      scaledBox.x + scaledBox.width <= 761 &&
+      scaledBox.y >= 0 &&
+      scaledBox.y + scaledBox.height <= 641,
+  );
+  await page
+    .getByRole("button", { name: "Open settings", exact: true })
+    .click();
+  await page.getByRole("tab", { name: "Display", exact: true }).click();
+  await page.getByLabel("UI scale", { exact: true }).selectOption("2");
+  assert.equal(
+    await page.locator(".momo-app").getAttribute("data-ui-scale"),
+    "2",
+  );
+  await page.getByLabel("UI scale", { exact: true }).selectOption("1");
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("button", { name: "Close settings" }).click();
   await page
     .getByLabel(
@@ -255,7 +415,7 @@ const mock = http.createServer(async (req, res) => {
       .readFileSync(path.join(temporary, "momo-office.json"), "utf8")
       .includes("fake-browser-secret-never-real"),
   );
-  assert.equal(state.agents.length, 9);
+  assert.equal(state.agents.length, 10);
   assert.deepEqual(state.agents.find((a) => a.id === "pip").model, {
     provider: "ollama",
     model: "llama3.2:latest",
@@ -267,7 +427,123 @@ const mock = http.createServer(async (req, res) => {
   assert.equal(state.runs[0].localOnly, true);
   assert.ok(state.runs[0].answers.length >= 5);
   assert.equal(state.runs[0].steps.length, 2);
+  assert.equal(
+    await page
+      .getByLabel("Quest log", { exact: true })
+      .locator(".step")
+      .count(),
+    2,
+  );
+  await page
+    .getByRole("button", { name: "Talk to a teammate", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Talk to Sage", exact: true }).click();
+  await page.getByRole("button", { name: "View output", exact: true }).click();
+  assert.equal(await page.locator(".step[open]").count(), 1);
   await page.screenshot({ path: path.join(screenshots, "Momo-Answer.png") });
+  await page.locator(".answer-heading").click();
+  for (const [width, height] of [
+    [1920, 1080],
+    [1280, 800],
+    [760, 640],
+  ]) {
+    await page.setViewportSize({ width, height });
+    await page.waitForTimeout(300);
+    const promptBox = await page
+      .getByRole("textbox", { name: "Ask Momo" })
+      .boundingBox();
+    assert.ok(
+      promptBox.x >= 0 &&
+        promptBox.x + promptBox.width <= width &&
+        promptBox.y + promptBox.height <= height,
+    );
+    assert.ok(Number.isInteger(Number(await canvas.getAttribute("data-zoom"))));
+    assert.ok(
+      Number.isInteger(Number(await canvas.getAttribute("data-render-scale"))),
+    );
+    await page.screenshot({
+      path: path.join(screenshots, `Pixel-Office-${width}x${height}.png`),
+    });
+  }
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  const frameRate = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        let first = 0,
+          last = 0,
+          count = 0;
+        function frame(t) {
+          if (!count) first = t;
+          last = t;
+          if (++count >= 120)
+            resolve({ fps: 119000 / (last - first), frames: count });
+          else requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+      }),
+  );
+  console.log(
+    "1080p / 10 agents, headless Canvas 2D:",
+    JSON.stringify(frameRate),
+  );
+  if (process.env.MOMO_PROFILE_VISUALS === "1") {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Performance.enable");
+    const before = await cdp.send("Performance.getMetrics");
+    await page.waitForTimeout(2000);
+    const after = await cdp.send("Performance.getMetrics");
+    console.log(
+      "Profile metric deltas:",
+      Object.fromEntries(
+        after.metrics
+          .filter((m) =>
+            [
+              "ScriptDuration",
+              "LayoutDuration",
+              "RecalcStyleDuration",
+              "TaskDuration",
+            ].includes(m.name),
+          )
+          .map((m) => [
+            m.name,
+            m.value - before.metrics.find((v) => v.name === m.name).value,
+          ]),
+      ),
+    );
+    for (const selector of ["#ui-root", "#phaser-container"]) {
+      await page
+        .locator(selector)
+        .evaluate((e) => (e.style.visibility = "hidden"));
+      const fps = await page.evaluate(
+        () =>
+          new Promise((resolve) => {
+            let first = 0,
+              count = 0;
+            function frame(t) {
+              if (!count) first = t;
+              if (++count >= 60) resolve(59000 / (t - first));
+              else requestAnimationFrame(frame);
+            }
+            requestAnimationFrame(frame);
+          }),
+      );
+      console.log("Profile hidden " + selector + ":", fps);
+      await page.locator(selector).evaluate((e) => (e.style.visibility = ""));
+    }
+  }
+
+  // A cold page with saved sound enabled still cannot start audio without a gesture.
+  const cold = await browser.newPage();
+  await cold.addInitScript(() =>
+    localStorage.setItem("momo-sound", JSON.stringify({ enabled: true })),
+  );
+  await cold.goto(origin);
+  await cold.getByRole("textbox", { name: "Ask Momo" }).waitFor();
+  assert.equal(
+    await cold.locator("html").getAttribute("data-audio-started"),
+    "false",
+  );
+  await cold.close();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(300);
   const box = await page
@@ -294,7 +570,13 @@ const mock = http.createServer(async (req, res) => {
     "PASS: clean office UI, desktop/mobile layouts, skills, added teammate, prompt routing, specialist results, final answer, export, origin guard, no browser exceptions. AI mocked.",
   );
 })()
-  .catch((e) => {
+  .catch(async (e) => {
+    try {
+      await browser
+        ?.contexts()[0]
+        ?.pages()[0]
+        ?.screenshot({ path: path.join(screenshots, "Failure.png") });
+    } catch {}
     console.error(e);
     process.exitCode = 1;
   })

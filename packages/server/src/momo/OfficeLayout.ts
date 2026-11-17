@@ -91,33 +91,54 @@ export const officeLayout = {
 };
 // Visual placement and collision rectangles are shared with the renderer.
 export const furniture = [
- {id:'conference',kind:'table',x:8,y:9,w:6,h:4},
- {id:'books',kind:'bookshelf',x:55,y:20,w:3,h:5},
- {id:'sofa',kind:'couch',x:43,y:7,w:13,h:3},
- {id:'lounge-table',kind:'table',x:47,y:13,w:5,h:2},
- {id:'kitchen-counter',kind:'counter',x:43,y:29,w:13,h:2},
- {id:'coffee-table',kind:'table',x:46,y:33,w:6,h:3},
- ...officeLayout.desks.map((d,i)=>({id:`desk-${i}`,kind:'desk',x:d.x-2,y:d.y-2,w:5,h:1})),
+  { id: "conference", kind: "table", x: 8, y: 9, w: 6, h: 4 },
+  { id: "books", kind: "bookshelf", x: 55, y: 20, w: 3, h: 5 },
+  { id: "sofa", kind: "couch", x: 43, y: 7, w: 13, h: 3 },
+  { id: "lounge-table", kind: "table", x: 47, y: 13, w: 5, h: 2 },
+  { id: "kitchen-counter", kind: "counter", x: 43, y: 29, w: 13, h: 2 },
+  { id: "coffee-table", kind: "table", x: 46, y: 33, w: 6, h: 3 },
+  ...officeLayout.desks.map((d, i) => ({
+    id: `desk-${i}`,
+    kind: "desk",
+    x: d.x - 2,
+    y: d.y - 2,
+    w: 5,
+    h: 1,
+  })),
 ];
 export const walls = [
- {x:2,y:5,w:18,h:1},{x:2,y:5,w:1,h:13},{x:19,y:5,w:1,h:13},
- {x:2,y:17,w:7,h:1},{x:11,y:17,w:9,h:1},
- {x:41,y:19,w:18,h:1},{x:41,y:19,w:1,h:8},{x:58,y:19,w:1,h:8},
- {x:41,y:26,w:7,h:1},{x:50,y:26,w:9,h:1},
+  { x: 2, y: 5, w: 18, h: 1 },
+  { x: 2, y: 5, w: 1, h: 13 },
+  { x: 19, y: 5, w: 1, h: 13 },
+  { x: 2, y: 17, w: 7, h: 1 },
+  { x: 11, y: 17, w: 9, h: 1 },
+  { x: 41, y: 19, w: 18, h: 1 },
+  { x: 41, y: 19, w: 1, h: 8 },
+  { x: 58, y: 19, w: 1, h: 8 },
+  { x: 41, y: 26, w: 7, h: 1 },
+  { x: 50, y: 26, w: 9, h: 1 },
 ];
-export const decorations=[
- {kind:'window',x:5,y:3},{kind:'window',x:27,y:3},{kind:'window',x:46,y:3},
- {kind:'whiteboard',x:9,y:5},{kind:'coffee',x:44,y:29},{kind:'sink',x:53,y:29},
- {kind:'plant',x:1,y:6},{kind:'plant',x:1,y:36},{kind:'plant',x:59,y:7},{kind:'plant',x:59,y:35},
+export const decorations = [
+  { kind: "window", x: 5, y: 3 },
+  { kind: "window", x: 27, y: 3 },
+  { kind: "window", x: 46, y: 3 },
+  { kind: "whiteboard", x: 9, y: 5 },
+  { kind: "coffee", x: 44, y: 29 },
+  { kind: "sink", x: 53, y: 29 },
+  { kind: "plant", x: 1, y: 6 },
+  { kind: "plant", x: 1, y: 36 },
+  { kind: "plant", x: 59, y: 7 },
+  { kind: "plant", x: 59, y: 35 },
 ];
-export const visualLayout={...officeLayout,furniture,walls,decorations};
+export const visualLayout = { ...officeLayout, furniture, walls, decorations };
 const blocked = new Set<string>();
 const block = (x: number, y: number, w: number, h: number) => {
   for (let yy = y; yy < y + h; yy++)
     for (let xx = x; xx < x + w; xx++) blocked.add(`${xx},${yy}`);
 };
 // The same rectangles drive tile art and pathfinding. Door gaps remain open.
-for(const area of [...walls,...furniture])block(area.x,area.y,area.w,area.h);
+for (const area of [...walls, ...furniture])
+  block(area.x, area.y, area.w, area.h);
 export function walkable(point: Point) {
   return (
     point.x >= 1 &&

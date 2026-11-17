@@ -6,7 +6,7 @@ The main screen is intentionally quiet: the office and one prompt box. Teammates
 
 ## Windows app
 
-Download **Momo-Office-0.5.0-Setup.exe** from this repository's Releases page. Close any older Momo Office window, run Setup and choose your installation folder. The default is `%LOCALAPPDATA%\Programs\Momo Office`. Setup creates Desktop and Start menu shortcuts, an `Uninstall Momo Office.exe` file inside the application folder, and a Windows Installed apps entry. The app bundles its own runtime; no Node.js or build commands are needed.
+Download **Momo-Office-0.6.0-Setup.exe** from this repository's Releases page. Close any older Momo Office window, run Setup and choose your installation folder. The default is `%LOCALAPPDATA%\Programs\Momo Office`. Setup creates Desktop and Start menu shortcuts, an `Uninstall Momo Office.exe` file inside the application folder, and a Windows Installed apps entry. The app bundles its own runtime; no Node.js or build commands are needed.
 
 Ollama is a separate prerequisite and is reused if already installed:
 
@@ -159,8 +159,8 @@ The office simulation is a plain module delivered over authenticated SSE, with t
 Every Windows build publishes `SHA256SUMS.txt` and an installer `.sha256` file with the release. Before running an unsigned installer, download its checksum from the same trusted repository release and compare in PowerShell:
 
 ```powershell
-Get-FileHash .\Momo-Office-0.5.0-Setup.exe -Algorithm SHA256
-Get-Content .\Momo-Office-0.5.0-Setup.exe.sha256
+Get-FileHash .\Momo-Office-0.6.0-Setup.exe -Algorithm SHA256
+Get-Content .\Momo-Office-0.6.0-Setup.exe.sha256
 ```
 
 The hash must match exactly. A matching hash verifies download integrity against that release, not publisher identity or the safety of generated AI output. Windows may still show an unknown-publisher warning because the build is unsigned.
@@ -176,3 +176,15 @@ The office is now a real Phaser tilemap with an original 16×16 canvas tileset. 
 The React HUD uses original wooden 9-slice frames and inventory-style icon slots. The top-right clock includes a sun/moon arc, local date/season and a cosmetic count of today’s completed requests. Team progress appears as a **Quest log**; completed answers have a reward panel with the existing Copy and Save actions. Past requests appear in the **Journal**. Click an agent, or use **Talk to a teammate**, to open a portrait dialogue with status, View output and Change model actions. Hover thoughts, keyboard controls and all task behavior remain available. Display also provides an optional pixel cursor and high-contrast panels.
 
 Sound is optional and muted by default. **Display → Optional sound** provides a master switch and separate master, music, room-tone, effect and dialogue volumes. All audio is synthesized in code: a quiet click, dialogue blips, completion notes, filtered room noise and an original short melody. No audio context starts before a genuine user gesture, including when sound preferences were previously enabled. Turning sound off stops the loops.
+
+## Display, accessibility and performance
+
+- UI scale offers integer **1×, 2× and 3×** independently of the world camera. At larger scales, panels scroll to keep controls accessible at the 760×640 minimum window size. The pixel cursor can be disabled; high-contrast panels use darker text on lighter parchment.
+- Every HUD action is a native keyboard control. Settings tabs support Left/Right/Home/End. Escape closes dialogues and Journal/teammate panels; focus returns to the preceding control. The canvas can be focused: arrow keys pan, +/− zoom, and 0 resets. A keyboard-accessible teammate roster provides the same dialogues as clicking sprites.
+- Reduced motion stops weather, ambient sprites, cat/typing animations and typewriter text, and snaps server movement instead of tweening it. No screen shake is used. These are contrast/accessibility measures, not a claim of a completed WCAG audit.
+- The real tilemap is built once and cached; furniture is cached per depth-sorted object. The native Canvas 2D renderer avoids software WebGL overhead for this small pixel scene. Animation/timing work reuses scene objects; React only receives changed status text rather than every position update.
+- The target is 60 fps at 1080p with ten agents. The shared headless Linux environment measured roughly **27–31 fps** with Canvas 2D (software WebGL was about 16 fps); an empty-page baseline was about 59 fps. This does **not** verify the 60 fps target on a Windows/RX 6600 desktop. Actual hardware performance still needs measurement; it is not represented as a passed requirement.
+
+`npm run test:ui` checks pixel rendering, integer zoom, real sprite-click dialogue, quest steps, keyboard tabs, UI scaling, muted/gesture-gated audio, and reduced-motion weather. It captures screenshots at 1920×1080, 1280×800 and 760×640, plus the mobile layout. `MOMO_PROFILE_VISUALS=1` adds optional renderer/compositor diagnostics to that test. Tests use mock AI completions.
+
+All new tiles, cat animation, HUD frames, cursor art and sounds are original MIT project assets. The only third-party art/font assets are **Silkscreen (SIL OFL 1.1)** and **MetroCity characters (CC0 1.0), with Pixel Agents adaptations (MIT)**. Full sources and bundled license locations are in [CREDITS.md](CREDITS.md). No Stardew Valley art, fonts, audio or music are included.

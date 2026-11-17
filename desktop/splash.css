@@ -112,3 +112,70 @@ button:focus-visible {
     opacity: 0.5;
   }
 }
+@font-face {
+  font-family: "Momo Pixel";
+  src: url("../packages/ui/dist/fonts/Silkscreen-Regular.ttf")
+    format("truetype");
+}
+html,
+body {
+  font-family: "Momo Pixel", monospace;
+  background: #20302b;
+  color: #342b22;
+}
+main {
+  border: 12px solid transparent;
+  border-image: url("../packages/ui/dist/art/wood-frame.png") 6 stretch;
+  background: #f2dcac;
+  min-height: 520px;
+  padding: 22px 20px;
+}
+img {
+  image-rendering: pixelated;
+  filter: none;
+  animation: none;
+  width: 96px;
+  height: 144px;
+  margin-top: 20px;
+}
+h1 {
+  font-size: 24px;
+  letter-spacing: 0;
+}
+.eyebrow,
+.subtitle,
+#startup-status {
+  color: #665039;
+}
+.subtitle {
+  font-size: 10px;
+  line-height: 1.7;
+}
+.loader {
+  background: #c8ad76;
+  border: 2px solid #7c603a;
+  height: 10px;
+  border-radius: 0;
+}
+.loader span {
+  background: #5c7f53;
+  border-radius: 0;
+  animation-timing-function: steps(8);
+}
+button {
+  font:
+    11px "Momo Pixel",
+    monospace;
+  color: #3d3122;
+  background: #d8b477;
+  border: 3px solid #8c6137;
+  border-radius: 0;
+}
+button:hover {
+  background: #f0d297;
+  color: #302719;
+}
+button:focus-visible {
+  outline: 3px solid #2b655b;
+  outline-offset: 4px;
+}

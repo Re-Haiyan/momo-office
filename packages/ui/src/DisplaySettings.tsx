@@ -1,4 +1,91 @@
-import {SoundSettings} from "./SoundSettings";
-import React from 'react';
-import {setDisplay,useDisplay,DisplayPrefs} from './display';
-export function DisplaySettings(){const {prefs,reduced}=useDisplay();return <div className="editor display-settings"><h3>Your window on the world</h3><p>Display preferences stay on this device and never change your agents or prompts.</p><label className="checkbox"><input type="checkbox" checked={prefs.pixelCursor} onChange={e=>setDisplay({pixelCursor:e.target.checked})}/>Pixel cursor</label><label className="checkbox"><input type="checkbox" checked={prefs.highContrast} onChange={e=>setDisplay({highContrast:e.target.checked})}/>High-contrast panels</label><label>Weather<select value={prefs.weather} onChange={e=>setDisplay({weather:e.target.value as DisplayPrefs['weather']})}><option value="off">Off</option><option value="rain">Light window rain</option><option value="leaves">Falling leaves outside</option></select></label>{reduced&&<p role="status">Reduced motion is on. Weather and ambient animation are disabled.</p>}<label>Season<select value={prefs.season} onChange={e=>setDisplay({season:e.target.value as DisplayPrefs['season']})}>{['auto','spring','summer','fall','winter'].map(s=><option key={s} value={s}>{s==='auto'?'Follow the real month':s}</option>)}</select></label><p className="muted">The day/night cycle follows this PC’s local clock. Calendar seasons use March–May, June–August, September–November and December–February.</p><SoundSettings/></div>;}
+import { SoundSettings } from "./SoundSettings";
+import React from "react";
+import { setDisplay, useDisplay, DisplayPrefs } from "./display";
+export function DisplaySettings() {
+  const { prefs, reduced } = useDisplay();
+  return (
+    <div className="editor display-settings">
+      <h3>Your window on the world</h3>
+      <p>
+        Display preferences stay on this device and never change your agents or
+        prompts.
+      </p>
+      <label>
+        UI scale
+        <select
+          aria-label="UI scale"
+          value={prefs.uiScale}
+          onChange={(e) =>
+            setDisplay({ uiScale: Number(e.target.value) as 1 | 2 | 3 })
+          }
+        >
+          {[1, 2, 3].map((s) => (
+            <option key={s} value={s}>
+              {s}×
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="muted">
+        Larger scales use scrollable panels on small windows. Game pixels keep
+        their own integer scale.
+      </p>
+      <label className="checkbox">
+        <input
+          type="checkbox"
+          checked={prefs.pixelCursor}
+          onChange={(e) => setDisplay({ pixelCursor: e.target.checked })}
+        />
+        Pixel cursor
+      </label>
+      <label className="checkbox">
+        <input
+          type="checkbox"
+          checked={prefs.highContrast}
+          onChange={(e) => setDisplay({ highContrast: e.target.checked })}
+        />
+        High-contrast panels
+      </label>
+      <label>
+        Weather
+        <select
+          aria-label="Weather"
+          value={prefs.weather}
+          onChange={(e) =>
+            setDisplay({ weather: e.target.value as DisplayPrefs["weather"] })
+          }
+        >
+          <option value="off">Off</option>
+          <option value="rain">Light window rain</option>
+          <option value="leaves">Falling leaves outside</option>
+        </select>
+      </label>
+      {reduced && (
+        <p role="status">
+          Reduced motion is on. Weather and ambient animation are disabled.
+        </p>
+      )}
+      <label>
+        Season
+        <select
+          aria-label="Season"
+          value={prefs.season}
+          onChange={(e) =>
+            setDisplay({ season: e.target.value as DisplayPrefs["season"] })
+          }
+        >
+          {["auto", "spring", "summer", "fall", "winter"].map((s) => (
+            <option key={s} value={s}>
+              {s === "auto" ? "Follow the real month" : s}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="muted">
+        The day/night cycle follows this PC’s local clock. Calendar seasons use
+        March–May, June–August, September–November and December–February.
+      </p>
+      <SoundSettings />
+    </div>
+  );
+}

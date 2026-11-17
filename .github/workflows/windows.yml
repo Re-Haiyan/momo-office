@@ -27,6 +27,12 @@ jobs:
       - run: npm test
       - run: npx playwright install chromium
       - run: npm run test:ui
+      - name: Save visual check screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: Momo-Office-VisualChecks
+          path: work/test-results/*.png
+          retention-days: 7
       - run: node tests/desktop.cjs
       - run: node tests/startup-cancel.cjs
       - run: npm run dist:win

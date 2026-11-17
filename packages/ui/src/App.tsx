@@ -1,8 +1,8 @@
-import {sound} from "./sound";
-import {AgentDialogue} from "./AgentDialogue";
-import {ClockPanel} from "./ClockPanel";
-import {useDisplay} from "./display";
-import {DisplaySettings} from "./DisplaySettings";
+import { sound } from "./sound";
+import { AgentDialogue } from "./AgentDialogue";
+import { ClockPanel } from "./ClockPanel";
+import { useDisplay } from "./display";
+import { DisplaySettings } from "./DisplaySettings";
 import { sessionHeaders } from "./session";
 import { Advanced } from "./Advanced";
 import { Providers, ChainEditor, AutoAssign, ModelRef } from "./Providers";
@@ -49,7 +49,7 @@ type Run = {
   result: string;
   error: string;
   createdAt: string;
-  updatedAt?:string;
+  updatedAt?: string;
 };
 type Store = {
   notice?: string;
@@ -111,12 +111,14 @@ function Cat({ small = false }: { small?: boolean }) {
   );
 }
 export function App() {
-  const {prefs}=useDisplay();
-  const [dialogueId,setDialogueId]=useState('');
-  const [roster,setRoster]=useState(false);
-  const [liveAgents,setLiveAgents]=useState<Record<string,any>>({});
-  const [settingsAgent,setSettingsAgent]=useState<string>();
-  const [focusedOutput,setFocusedOutput]=useState('');
+  const { prefs } = useDisplay();
+  const [dialogueId, setDialogueId] = useState("");
+  const [roster, setRoster] = useState(false);
+  const journalRef = useRef<HTMLElement>(null);
+  const rosterRef = useRef<HTMLElement>(null);
+  const [liveAgents, setLiveAgents] = useState<Record<string, any>>({});
+  const [settingsAgent, setSettingsAgent] = useState<string>();
+  const [focusedOutput, setFocusedOutput] = useState("");
   const [state, setState] = useState<Store>();
   const [connection, setConnection] = useState<Connection>();
   const [networkError, setNetworkError] = useState("");
@@ -128,8 +130,8 @@ export function App() {
   const [settings, setSettings] = useState(false);
   const [history, setHistory] = useState(false);
   const [busy, setBusy] = useState(false);
-  const completeSounds=useRef<Set<string>>();
-  useEffect(()=>sound.install(),[]);
+  const completeSounds = useRef<Set<string>>();
+  useEffect(() => sound.install(), []);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const load = async () => {
     try {
@@ -164,13 +166,45 @@ export function App() {
       clearInterval(status);
     };
   }, []);
-  useEffect(()=>{
-    const select=(e:Event)=>{setDialogueId((e as CustomEvent).detail.id);setRoster(false);};
-    const status=(e:Event)=>setLiveAgents(Object.fromEntries((e as CustomEvent).detail.map((a:any)=>[a.id,a])));
-    window.addEventListener('momo:agent-select',select);window.addEventListener('momo:agents',status);
-    return()=>{window.removeEventListener('momo:agent-select',select);window.removeEventListener('momo:agents',status);};
-  },[]);
-  useEffect(()=>{document.documentElement.dataset.pixelCursor=String(prefs.pixelCursor);},[prefs.pixelCursor]);
+  useEffect(() => {
+    const select = (e: Event) => {
+      setDialogueId((e as CustomEvent).detail.id);
+      setRoster(false);
+    };
+    const status = (e: Event) =>
+      setLiveAgents(
+        Object.fromEntries(
+          (e as CustomEvent).detail.map((a: any) => [a.id, a]),
+        ),
+      );
+    window.addEventListener("momo:agent-select", select);
+    window.addEventListener("momo:agents", status);
+    return () => {
+      window.removeEventListener("momo:agent-select", select);
+      window.removeEventListener("momo:agents", status);
+    };
+  }, []);
+  useEffect(() => {
+    document.documentElement.dataset.pixelCursor = String(prefs.pixelCursor);
+  }, [prefs.pixelCursor]);
+  useEffect(() => {
+    if (!history && !roster) return;
+    const old = document.activeElement as HTMLElement;
+    const panel = history ? journalRef.current : rosterRef.current;
+    panel?.focus();
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !settings) {
+        e.preventDefault();
+        setHistory(false);
+        setRoster(false);
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => {
+      window.removeEventListener("keydown", key);
+      if (old?.isConnected) old.focus();
+    };
+  }, [history, roster, settings]);
   const run = state?.runs.find((r) => r.id === selected);
   const active = state?.runs.filter((r) => !done(r)) || [];
   const perform = async (fn: () => Promise<unknown>) => {
@@ -203,21 +237,46 @@ export function App() {
       setBusy(false);
     }
   };
-  useEffect(()=>{
-    if(!state)return;
-    const completed=state.runs.filter(r=>['completed','completed_with_warnings'].includes(r.status)).map(r=>r.id);
-    if(completeSounds.current){if(completed.some(id=>!completeSounds.current!.has(id)))sound.complete();}
-    completeSounds.current=new Set(completed);
-  },[state]);
+  useEffect(() => {
+    if (!state) return;
+    const completed = state.runs
+      .filter((r) =>
+        ["completed", "completed_with_warnings"].includes(r.status),
+      )
+      .map((r) => r.id);
+    if (completeSounds.current) {
+      if (completed.some((id) => !completeSounds.current!.has(id)))
+        sound.complete();
+    }
+    completeSounds.current = new Set(completed);
+  }, [state]);
   const currentStep = run?.steps.find((s) => s.status === "working");
   const worker = state?.agents.find((a) => a.id === currentStep?.agentId);
-  const dialogueAgent=state?.agents.find(a=>a.id===dialogueId);
-  const outputRun=[...(state?.runs||[])].reverse().find(r=>r.steps.some(s=>s.agentId===dialogueId&&s.output));
-  const lastOutput=outputRun?.steps.filter(s=>s.agentId===dialogueId&&s.output).at(-1)?.output;
-  const message=liveAgents[dialogueId]?.currentTask || (lastOutput?lastOutput.replace(/```[\s\S]*?```/g,'[Code proposal]').slice(0,240):liveAgents[dialogueId]?.thought||'Ready for the next idea.');
-  const today=new Date().toDateString();const completedToday=(state?.runs||[]).filter(r=>['completed','completed_with_warnings'].includes(r.status)&&new Date(r.updatedAt||r.createdAt).toDateString()===today).length;
+  const dialogueAgent = state?.agents.find((a) => a.id === dialogueId);
+  const outputRun = [...(state?.runs || [])]
+    .reverse()
+    .find((r) => r.steps.some((s) => s.agentId === dialogueId && s.output));
+  const lastOutput = outputRun?.steps
+    .filter((s) => s.agentId === dialogueId && s.output)
+    .at(-1)?.output;
+  const message =
+    liveAgents[dialogueId]?.currentTask ||
+    (lastOutput
+      ? lastOutput.replace(/```[\s\S]*?```/g, "[Code proposal]").slice(0, 240)
+      : liveAgents[dialogueId]?.thought || "Ready for the next idea.");
+  const today = new Date().toDateString();
+  const completedToday = (state?.runs || []).filter(
+    (r) =>
+      ["completed", "completed_with_warnings"].includes(r.status) &&
+      new Date(r.updatedAt || r.createdAt).toDateString() === today,
+  ).length;
   return (
-    <div className="momo-app" data-high-contrast={prefs.highContrast}>
+    <div
+      className="momo-app"
+      data-high-contrast={prefs.highContrast}
+      data-ui-scale={prefs.uiScale}
+      style={{ "--ui-scale": prefs.uiScale } as React.CSSProperties}
+    >
       <header className="topbar">
         <div className="brand">
           <Cat small />
@@ -246,7 +305,7 @@ export function App() {
           </span>
         </div>
       </header>
-      <ClockPanel completed={completedToday}/>
+      <ClockPanel completed={completedToday} />
       {networkError && (
         <div className="network-banner" role="alert">
           Office connection lost. {networkError}{" "}
@@ -267,7 +326,7 @@ export function App() {
               onClick={() => setCollapsed(!collapsed)}
               aria-expanded={!collapsed}
             >
-              <div className="momo-avatar">🐈</div>
+              <div className="momo-avatar" aria-hidden="true" />
               <div>
                 <strong>{phase[run.status]}</strong>
                 <span>
@@ -285,15 +344,35 @@ export function App() {
                 <p className="your-request">You: {run.prompt}</p>
                 {run.plan && !run.result && <p>{run.plan}</p>}
                 {run.steps.length > 0 && (
-                  <details className="team-progress quest-log" aria-label="Quest log" open>
+                  <details
+                    className="team-progress quest-log"
+                    aria-label="Quest log"
+                    open
+                  >
                     <summary>
                       {run.steps.filter((s) => s.status === "completed").length}{" "}
-                      of {run.steps.length} assignments finished · Quest log · Team progress
+                      of {run.steps.length} assignments finished · Quest log ·
+                      Team progress
                     </summary>
                     {run.steps.map((s) => (
-                      <details className="step" key={s.id} open={s.id===focusedOutput||undefined}>
+                      <details
+                        className="step"
+                        key={s.id}
+                        open={s.id === focusedOutput || undefined}
+                      >
                         <summary>
-                          <span className={`step-dot ${s.status}`} aria-label={s.status}>{s.status==='completed'?'✓':s.status==='failed'?'×':s.status==='working'?'>':'·'}</span>
+                          <span
+                            className={`step-dot ${s.status}`}
+                            aria-label={s.status}
+                          >
+                            {s.status === "completed"
+                              ? "✓"
+                              : s.status === "failed"
+                                ? "×"
+                                : s.status === "working"
+                                  ? ">"
+                                  : "·"}
+                          </span>
                           {state?.agents.find((a) => a.id === s.agentId)
                             ?.name || "Teammate"}{" "}
                           · {s.title}
@@ -334,7 +413,12 @@ export function App() {
                     )}
                   </details>
                 )}
-                {run.result && <section className="reward-panel"><h3>Your reward · the team’s answer</h3><pre className="result">{run.result}</pre></section>}
+                {run.result && (
+                  <section className="reward-panel">
+                    <h3>Your reward · the team’s answer</h3>
+                    <pre className="result">{run.result}</pre>
+                  </section>
+                )}
                 {run.error && (
                   <p className="error" role="alert">
                     {run.error}
@@ -440,11 +524,57 @@ export function App() {
           }}
         >
           <nav className="inventory-bar" aria-label="Office toolbar">
-            <button type="button" className="icon-button" data-tooltip="Settings" title="Settings" aria-label="Open settings" onClick={()=>{setSettingsAgent(undefined);setSettings(true);}}><span className="slot-icon gear-icon" aria-hidden="true"/></button>
-            <button type="button" className="icon-button" data-tooltip="Journal" title="Journal" aria-label="Past requests" onClick={()=>setHistory(!history)}><span className="slot-icon journal-icon" aria-hidden="true"/></button>
-            <button type="button" className="icon-button" data-tooltip="Quest log" title="Quest log" aria-label="Open quest log" disabled={!state?.runs.length} onClick={()=>{setSelected(state!.runs.at(-1)!.id);setCollapsed(false);}}><span className="slot-icon quest-icon" aria-hidden="true"/></button>
-            <button type="button" className="icon-button" data-tooltip="Teammates" title="Talk to a teammate" aria-label="Talk to a teammate" aria-expanded={roster} onClick={()=>setRoster(!roster)}><span className="slot-icon team-icon" aria-hidden="true"/></button>
-            <span className="toolbar-wordmark">MOMO OFFICE <small>small team, big ideas</small></span>
+            <button
+              type="button"
+              className="icon-button"
+              data-tooltip="Settings"
+              title="Settings"
+              aria-label="Open settings"
+              onClick={() => {
+                setSettingsAgent(undefined);
+                setSettings(true);
+              }}
+            >
+              <span className="slot-icon gear-icon" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              data-tooltip="Journal"
+              title="Journal"
+              aria-label="Past requests"
+              onClick={() => setHistory(!history)}
+            >
+              <span className="slot-icon journal-icon" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              data-tooltip="Quest log"
+              title="Quest log"
+              aria-label="Open quest log"
+              disabled={!state?.runs.length}
+              onClick={() => {
+                setSelected(state!.runs.at(-1)!.id);
+                setCollapsed(false);
+              }}
+            >
+              <span className="slot-icon quest-icon" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              data-tooltip="Teammates"
+              title="Talk to a teammate"
+              aria-label="Talk to a teammate"
+              aria-expanded={roster}
+              onClick={() => setRoster(!roster)}
+            >
+              <span className="slot-icon team-icon" aria-hidden="true" />
+            </button>
+            <span className="toolbar-wordmark">
+              MOMO OFFICE <small>small team, big ideas</small>
+            </span>
           </nav>
           <label htmlFor="momo-prompt">
             <span>Ask Momo</span>
@@ -500,7 +630,13 @@ export function App() {
         </form>
       </section>
       {history && (
-        <aside className="history-panel">
+        <aside
+          className="history-panel"
+          role="dialog"
+          aria-label="Journal"
+          tabIndex={-1}
+          ref={journalRef}
+        >
           <div className="panel-title">
             <h2>Journal</h2>
             <button
@@ -529,8 +665,63 @@ export function App() {
           ))}
         </aside>
       )}
-      {roster&&<aside className="agent-roster wood-panel" aria-label="Office teammates"><div className="panel-title"><h2>Say hello</h2><button aria-label="Close teammates" onClick={()=>setRoster(false)}>×</button></div>{state?.agents.map(a=><button key={a.id} onClick={()=>{setDialogueId(a.id);setRoster(false);}} aria-label={`Talk to ${a.name}`}>{a.name}<small>{a.role}</small></button>)}</aside>}
-      {dialogueAgent&&<AgentDialogue agent={dialogueAgent} message={message} hasOutput={!!outputRun} onClose={()=>setDialogueId('')} onOutput={()=>{if(outputRun){setSelected(outputRun.id);setFocusedOutput(outputRun.steps.filter(s=>s.agentId===dialogueId&&s.output).at(-1)!.id);setCollapsed(false);setDialogueId('');}}} onModel={()=>{setSettingsAgent(dialogueId);setDialogueId('');setSettings(true);}}/>}
+      {roster && (
+        <aside
+          className="agent-roster wood-panel"
+          role="dialog"
+          aria-label="Office teammates"
+          tabIndex={-1}
+          ref={rosterRef}
+        >
+          <div className="panel-title">
+            <h2>Say hello</h2>
+            <button
+              aria-label="Close teammates"
+              onClick={() => setRoster(false)}
+            >
+              ×
+            </button>
+          </div>
+          {state?.agents.map((a) => (
+            <button
+              key={a.id}
+              onClick={() => {
+                setDialogueId(a.id);
+                setRoster(false);
+              }}
+              aria-label={`Talk to ${a.name}`}
+            >
+              {a.name}
+              <small>{a.role}</small>
+            </button>
+          ))}
+        </aside>
+      )}
+      {dialogueAgent && (
+        <AgentDialogue
+          agent={dialogueAgent}
+          message={message}
+          hasOutput={!!outputRun}
+          onClose={() => setDialogueId("")}
+          onOutput={() => {
+            if (outputRun) {
+              setSelected(outputRun.id);
+              setFocusedOutput(
+                outputRun.steps
+                  .filter((s) => s.agentId === dialogueId && s.output)
+                  .at(-1)!.id,
+              );
+              setCollapsed(false);
+              setDialogueId("");
+            }
+          }}
+          onModel={() => {
+            setSettingsAgent(dialogueId);
+            setDialogueId("");
+            setSettings(true);
+          }}
+        />
+      )}
       {settings && state && (
         <Settings
           state={state}
@@ -555,13 +746,16 @@ function Settings({
   onRefresh,
 }: {
   state: Store;
-  initialAgentId?:string;
+  initialAgentId?: string;
   connection?: Connection;
   onClose: () => void;
   onRefresh: () => Promise<void>;
 }) {
   const [tab, setTab] = useState("team");
-  const [agent, setAgent] = useState<Agent|undefined>(()=>{const a=state.agents.find(a=>a.id===initialAgentId);return a?structuredClone(a):undefined;});
+  const [agent, setAgent] = useState<Agent | undefined>(() => {
+    const a = state.agents.find((a) => a.id === initialAgentId);
+    return a ? structuredClone(a) : undefined;
+  });
   const [skill, setSkill] = useState<Skill>();
   const [model, setModel] = useState(state.settings.model);
   const [url, setUrl] = useState(state.settings.ollamaUrl);
@@ -578,7 +772,7 @@ function Settings({
       if (e.key === "Tab") {
         const focusable = Array.from(
           ref.current?.querySelectorAll<HTMLElement>(
-            "button:not(:disabled), input, textarea, select, a[href]",
+            'button:not(:disabled):not([tabindex="-1"]), input, textarea, select, a[href]',
           ) || [],
         ).filter((el) => el.offsetParent !== null);
         const first = focusable[0],
@@ -638,32 +832,68 @@ function Settings({
             ×
           </button>
         </div>
-        <nav className="tabs">
-          {["team", "skills", "providers", "advanced", "model", "display"].map((t) => (
-            <button
-              key={t}
-              className={t === tab ? "active" : ""}
-              onClick={() => {
-                setTab(t);
-                setAgent(undefined);
-                setSkill(undefined);
-                setNotice("");
-                setError("");
-              }}
-            >
-              {t === "display" ? "Display" : t === "advanced"
-                ? "Advanced"
-                : t === "providers"
-                  ? "Providers"
-                  : t === "model"
-                    ? "Models"
-                    : t === "team"
-                      ? "Teammates"
-                      : "Skills"}
-            </button>
-          ))}
+        <nav
+          className="tabs"
+          role="tablist"
+          aria-label="Settings sections"
+          onKeyDown={(e) => {
+            if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(e.key))
+              return;
+            e.preventDefault();
+            const tabs = Array.from(
+              e.currentTarget.querySelectorAll<HTMLButtonElement>("[role=tab]"),
+            );
+            const i = tabs.indexOf(document.activeElement as HTMLButtonElement);
+            const n =
+              e.key === "Home"
+                ? 0
+                : e.key === "End"
+                  ? tabs.length - 1
+                  : (i + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) %
+                    tabs.length;
+            tabs[n]?.focus();
+            tabs[n]?.click();
+          }}
+        >
+          {["team", "skills", "providers", "advanced", "model", "display"].map(
+            (t) => (
+              <button
+                key={t}
+                id={`settings-tab-${t}`}
+                role="tab"
+                tabIndex={t === tab ? 0 : -1}
+                aria-selected={t === tab}
+                aria-controls={`settings-panel-${t}`}
+                className={t === tab ? "active" : ""}
+                onClick={() => {
+                  setTab(t);
+                  setAgent(undefined);
+                  setSkill(undefined);
+                  setNotice("");
+                  setError("");
+                }}
+              >
+                {t === "display"
+                  ? "Display"
+                  : t === "advanced"
+                    ? "Advanced"
+                    : t === "providers"
+                      ? "Providers"
+                      : t === "model"
+                        ? "Models"
+                        : t === "team"
+                          ? "Teammates"
+                          : "Skills"}
+              </button>
+            ),
+          )}
         </nav>
-        <div className="settings-content">
+        <div
+          className="settings-content"
+          role="tabpanel"
+          id={`settings-panel-${tab}`}
+          aria-labelledby={`settings-tab-${tab}`}
+        >
           {error && (
             <p className="error" role="alert">
               {error}
@@ -674,7 +904,7 @@ function Settings({
               {notice}
             </p>
           )}
-          {tab === "display" && <DisplaySettings/>}
+          {tab === "display" && <DisplaySettings />}
           {tab === "providers" && <Providers />}
           {tab === "advanced" && (
             <Advanced settings={state.settings} onSaved={onRefresh} />
@@ -727,7 +957,13 @@ function Settings({
                       className="agent-portrait"
                       style={{ background: a.color }}
                     >
-                      {a.id === "momo" ? "🐈" : a.name.charAt(0)}
+                      <span
+                        className={`sprite-portrait ${a.id === "momo" ? "sprite-cat" : ""}`}
+                        aria-hidden="true"
+                        style={{
+                          backgroundImage: `url(${a.id === "momo" ? "/art/momo-portrait.png" : `/assets/characters/char_${[...a.id].reduce((n, c) => n + c.charCodeAt(0), 0) % 6}.png`})`,
+                        }}
+                      />
                     </span>
                     <strong>{a.name}</strong>
                     <span>{a.role}</span>

@@ -31,5 +31,18 @@ html {
   pointer-events: auto;
 }
 
-#phaser-container{display:grid;place-items:center;overflow:hidden;background:#171e20;padding:80px 0 160px;}
-#phaser-container canvas{image-rendering:pixelated;image-rendering:crisp-edges;flex:none;max-width:none;position:static!important;margin:0!important;}
+#phaser-container {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #171e20;
+  padding: 80px 0 160px;
+}
+#phaser-container canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  flex: none;
+  max-width: none;
+  position: static !important;
+  margin: 0 !important;
+}

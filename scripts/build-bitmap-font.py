@@ -10,4 +10,7 @@ xm=Element('font');SubElement(xm,'info',face='Silkscreen',size='8');SubElement(x
 for i,c in enumerate(chars):
  x=i%16*16;y=i//16*16;draw.text((x,y),c,font=font,fill=1)
  SubElement(items,'char',id=str(ord(c)),x=str(x),y=str(y),width='16',height='11',xoffset='0',yoffset='0',xadvance=str(round(font.getlength(c))),page='0',chnl='15')
-rgba=Image.new('RGBA',im.size,(255,255,255,0));rgba.putalpha(im.convert('L'));rgba.save(root/'silkscreen.png');ElementTree(xm).write(root/'silkscreen.xml',encoding='utf-8',xml_declaration=True)
+rgba=Image.new('RGBA',im.size,(255,240,192,0));rgba.putalpha(im.convert('L'));rgba.save(root/'silkscreen.png');ElementTree(xm).write(root/'silkscreen.xml',encoding='utf-8',xml_declaration=True)
+
+ink=Image.new('RGBA',im.size,(54,44,36,0));ink.putalpha(im.convert('L'));ink.save(root/'silkscreen-ink.png')
+xm.find('pages/page').set('file','silkscreen-ink.png');ElementTree(xm).write(root/'silkscreen-ink.xml',encoding='utf-8',xml_declaration=True)

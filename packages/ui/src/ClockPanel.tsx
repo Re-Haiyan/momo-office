@@ -1,3 +1,46 @@
-import React,{useEffect,useState} from 'react';
-import {seasonFor,useDisplay} from './display';
-export function ClockPanel({completed}:{completed:number}){const [now,setNow]=useState(()=>new Date());const {prefs}=useDisplay();useEffect(()=>{const t=setInterval(()=>setNow(new Date()),10000);return()=>clearInterval(t);},[]);const season=prefs.season==='auto'?seasonFor(now):prefs.season;const hour=now.getHours()+now.getMinutes()/60;const night=hour<6||hour>=19;const angle=((hour%12)/12)*Math.PI;return <aside className="clock-panel wood-panel" aria-label="Office clock"><div className="sun-dial" aria-hidden="true"><span className={night?'moon':'sun'} style={{left:Math.round(36-Math.cos(angle)*28),top:Math.round(27-Math.sin(angle)*22)}}/></div><div className="clock-readout"><time dateTime={now.toISOString()}>{now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time><span>{now.toLocaleDateString([],{month:'short',day:'numeric',weekday:'short'})}</span><strong>{season}</strong></div><span className="gold-counter" title="Completed requests today — cosmetic, no currency">{String(completed).padStart(3,'0')} DONE</span></aside>;}
+import React, { useEffect, useState } from "react";
+import { seasonFor, useDisplay } from "./display";
+export function ClockPanel({ completed }: { completed: number }) {
+  const [now, setNow] = useState(() => new Date());
+  const { prefs } = useDisplay();
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 10000);
+    return () => clearInterval(t);
+  }, []);
+  const season = prefs.season === "auto" ? seasonFor(now) : prefs.season;
+  const hour = now.getHours() + now.getMinutes() / 60;
+  const night = hour < 6 || hour >= 19;
+  const angle = ((hour % 12) / 12) * Math.PI;
+  return (
+    <aside className="clock-panel wood-panel" aria-label="Office clock">
+      <div className="sun-dial" aria-hidden="true">
+        <span
+          className={night ? "moon" : "sun"}
+          style={{
+            left: Math.round(36 - Math.cos(angle) * 28),
+            top: Math.round(27 - Math.sin(angle) * 22),
+          }}
+        />
+      </div>
+      <div className="clock-readout">
+        <time dateTime={now.toISOString()}>
+          {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+        </time>
+        <span>
+          {now.toLocaleDateString([], {
+            month: "short",
+            day: "numeric",
+            weekday: "short",
+          })}
+        </span>
+        <strong>{season}</strong>
+      </div>
+      <span
+        className="gold-counter"
+        title="Completed requests today — cosmetic, no currency"
+      >
+        {String(completed).padStart(3, "0")} DONE
+      </span>
+    </aside>
+  );
+}
