@@ -168,3 +168,5 @@ The hash must match exactly. A matching hash verifies download integrity against
 ## Original pixel-art restyle — rendering
 
 The scene uses a fixed 960×640 internal canvas, nearest-neighbor rendering, integer CSS scale and integer camera zoom (1–4). Dark letterboxing absorbs unused space; smaller windows crop the world rather than blur it, and drag-to-pan remains available. Double-click resets the camera. Scene labels use a bitmap atlas generated from Silkscreen; the React overlay uses the same font. Silkscreen is SIL OFL 1.1, not a Stardew Valley font. Full asset sources and redistribution licenses are listed in [CREDITS.md](CREDITS.md).
+
+The office is now a real Phaser tilemap with an original 16×16 canvas tileset. `tileset.ts` is the single swappable atlas definition. Art placement comes from the same `OfficeLayout.ts` wall/furniture rectangles used by pathfinding, including the existing door gaps. Furniture and agents sort by their foot/bottom Y position. Monitors, plants and coffee steam animate; Momo uses an original four-direction pixel cat. Human sheets retain their existing walk rows, with the available typing frames used at work.

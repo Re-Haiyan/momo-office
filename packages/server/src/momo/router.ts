@@ -3,7 +3,7 @@ import { Router } from "express";
 import { momo } from "./instance";
 import { cloudIds } from "./providers/secrets";
 import type { CloudId } from "./providers/types";
-import { officeLayout } from "./OfficeLayout";
+import { visualLayout as officeLayout } from "./OfficeLayout";
 
 export const momoRouter = Router();
 // Browsers on other websites cannot submit commands to this local desktop app.

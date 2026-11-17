@@ -10,3 +10,8 @@ No Stardew Valley assets, code, UI art, fonts or music are included, copied or t
 | App icon / startup mascot | Generated originally for Momo Office | Original project asset; MIT |
 
 Phaser, React and other software dependencies retain their respective package licenses. See LICENSE for project and upstream notices.
+
+| Original pixel assets | Source | License |
+| --- | --- | --- |
+| 16×16 office atlas: floors, rugs, walls, doors, windows, furniture, decor and animation frames | Procedurally drawn in `packages/ui/src/game/tileset.ts` | Original Momo Office art; MIT |
+| 16×24 four-direction cat walk/idle/work sheet | Procedurally drawn in `packages/ui/src/game/tileset.ts` | Original Momo Office art; MIT |
