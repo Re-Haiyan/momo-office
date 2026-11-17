@@ -16,6 +16,7 @@ files:
   - desktop/splash-preload.cjs
   - packages/server/dist/**/*.js
   - packages/ui/dist/**
+  - CREDITS.md
   - LICENSE
   - package.json
 win:

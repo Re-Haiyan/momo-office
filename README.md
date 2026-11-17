@@ -121,7 +121,7 @@ Release executables are built on Windows CI. Engine and browser integration test
 
 ## Credits and license
 
-Based on [AgentOffice by Harish Kotra](https://github.com/harishkotra/agent-office), with its MIT license and character sprites retained. Momo's mascot was generated for this project. Momo Office replaces the autonomous demo engine, old floating panels, SQLite tooling and unused packages with a coordinator, serial task queue and compact desktop app. See [LICENSE](LICENSE).
+Based on [AgentOffice by Harish Kotra](https://github.com/harishkotra/agent-office), with its MIT license and CC0-based character sprites (with MIT adaptations) retained. Momo's mascot was generated for this project. Momo Office replaces the autonomous demo engine, old floating panels, SQLite tooling and unused packages with a coordinator, serial task queue and compact desktop app. See [LICENSE](LICENSE).
 
 ## Reliability upgrades — phase 1
 
@@ -164,3 +164,7 @@ Get-Content .\Momo-Office-0.5.0-Setup.exe.sha256
 ```
 
 The hash must match exactly. A matching hash verifies download integrity against that release, not publisher identity or the safety of generated AI output. Windows may still show an unknown-publisher warning because the build is unsigned.
+
+## Original pixel-art restyle — rendering
+
+The scene uses a fixed 960×640 internal canvas, nearest-neighbor rendering, integer CSS scale and integer camera zoom (1–4). Dark letterboxing absorbs unused space; smaller windows crop the world rather than blur it, and drag-to-pan remains available. Double-click resets the camera. Scene labels use a bitmap atlas generated from Silkscreen; the React overlay uses the same font. Silkscreen is SIL OFL 1.1, not a Stardew Valley font. Full asset sources and redistribution licenses are listed in [CREDITS.md](CREDITS.md).

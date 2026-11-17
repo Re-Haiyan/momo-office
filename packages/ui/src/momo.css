@@ -1,3 +1,4 @@
+@font-face{font-family:"Momo Pixel";src:url("/fonts/Silkscreen-Regular.ttf") format("truetype");font-display:swap;}
 :root {
   font-family: "Segoe UI", system-ui, sans-serif;
   color: #373144;
@@ -825,3 +826,8 @@ legend {
     flex-wrap: wrap;
   }
 }
+
+:root{font-family:"Momo Pixel",monospace;}
+pre{font-family:"Momo Pixel",monospace;}
+
+body,.momo-app{font-family:"Momo Pixel",monospace;}

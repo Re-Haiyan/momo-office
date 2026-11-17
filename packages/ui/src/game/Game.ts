@@ -29,6 +29,7 @@ class OfficeScene extends Phaser.Scene {
         frameWidth: 16,
         frameHeight: 32,
       });
+    this.load.bitmapFont("pixel-font","/fonts/silkscreen.png","/fonts/silkscreen.xml");
     this.load.image("momo-cat", "/momo-icon.png");
     this.load.json({
       key: "office-layout",
@@ -37,12 +38,14 @@ class OfficeScene extends Phaser.Scene {
     });
   }
   private fitOffice() {
-    const width = this.scale.width,
-      height = Math.max(220, this.scale.height - 270);
-    const camera = this.cameras.main;
-    camera.setViewport(0, 90, width, height);
-    camera.setZoom(Math.min(width / 1040, height / 720, 1.65));
-    camera.centerOn(480, 316);
+    const camera=this.cameras.main;
+    camera.setViewport(0,0,960,640).setRoundPixels(true).setZoom(1).centerOn(480,320);
+    this.fitCanvas();
+  }
+  private fitCanvas() {
+    const factor=Math.max(1,Math.floor(Math.min(window.innerWidth/960,(window.innerHeight-240)/640)));
+    const canvas=this.game.canvas;canvas.style.width=`${960*factor}px`;canvas.style.height=`${640*factor}px`;
+    this.scale.updateBounds();this.scale.displayScale.set(1/factor,1/factor);
   }
   create() {
     for (let i = 0; i < 6; i++) {
@@ -67,7 +70,8 @@ class OfficeScene extends Phaser.Scene {
     this.drawCozyOffice();
     this.cameras.main.setBackgroundColor("#242335");
     this.fitOffice();
-    this.scale.on("resize", this.fitOffice, this);
+    const resize=()=>this.fitCanvas();window.addEventListener("resize",resize);
+    this.events.once("shutdown",()=>window.removeEventListener("resize",resize));
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       this.dragging = true;
       this.moved = false;
@@ -100,7 +104,7 @@ class OfficeScene extends Phaser.Scene {
       ) => {
         const camera = this.cameras.main;
         const before = camera.getWorldPoint(pointer.x, pointer.y);
-        camera.setZoom(Phaser.Math.Clamp(camera.zoom - dy * 0.001, 0.4, 2.5));
+        camera.setZoom(Phaser.Math.Clamp(camera.zoom+(dy>0?-1:1),1,4));
         const after = camera.getWorldPoint(pointer.x, pointer.y);
         camera.scrollX += before.x - after.x;
         camera.scrollY += before.y - after.y;
@@ -146,27 +150,9 @@ class OfficeScene extends Phaser.Scene {
     const shadow = this.add.ellipse(0, 4, 18, 7, 0x393044, 0.18);
     const character = this.add.sprite(0, -8, key, 0);
     if (id === "momo") character.setDisplaySize(31, 31);
-    const label = this.add
-      .text(0, 15, agent.name, {
-        fontSize: "9px",
-        color: "#544558",
-        backgroundColor: "#f8efdded",
-        padding: { x: 4, y: 2 },
-      })
-      .setOrigin(0.5);
-    const work = this.add
-      .text(12, -27, "✦", { fontSize: "13px", color: "#695789" })
-      .setVisible(false);
-    const thought = this.add
-      .text(0, -45, "", {
-        fontSize: "9px",
-        color: "#695778",
-        backgroundColor: "#fffaf5f5",
-        padding: { x: 6, y: 5 },
-        wordWrap: { width: 150 },
-      })
-      .setOrigin(0.5, 1)
-      .setVisible(false);
+    const label=this.add.bitmapText(0,15,'pixel-font',agent.name,8).setTint(0xf6e2af).setOrigin(0.5);
+    const work=this.add.bitmapText(12,-27,'pixel-font','*',8).setTint(0xffd36b).setVisible(false);
+    const thought=this.add.bitmapText(0,-45,'pixel-font','',8).setTint(0xffe9b1).setMaxWidth(150).setOrigin(0.5,1).setVisible(false);
     group.add([shadow, character, label, work, thought]);
     group.setSize(32, 48).setInteractive();
     group.on("pointerover", () => thought.setVisible(true));
@@ -244,7 +230,7 @@ class OfficeScene extends Phaser.Scene {
       label: string,
       color = "#766478",
       size = "8px",
-    ) => this.add.text(x, y, label, { fontSize: size, color }).setOrigin(0.5);
+    ) => this.add.bitmapText(x,y,"pixel-font",label,8).setTint(Number(color.replace("#","0x"))).setOrigin(0.5);
     const plant = (x: number, y: number) => {
       g.fillStyle(0x665147, 0.15);
       g.fillEllipse(x + 2, y + 9, 23, 10);
@@ -433,12 +419,13 @@ export function setupPhaser(parentId: string) {
   return new Phaser.Game({
     type: Phaser.AUTO,
     parent: parentId,
-    width: window.innerWidth,
-    height: window.innerHeight,
+    width: 960,
+    height: 640,
+    render:{pixelArt:true,roundPixels:true,antialias:false,antialiasGL:false},
     backgroundColor: "#242335",
     scene: [OfficeScene],
     pixelArt: true,
-    scale: { mode: Phaser.Scale.RESIZE },
+    scale: { mode: Phaser.Scale.NONE },
     input: { keyboard: false },
   });
 }
