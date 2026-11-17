@@ -1,0 +1,36 @@
+{
+  "name": "momo-office",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A cozy local AI office with a coordinator and specialist teammates.",
+  "author": "Momo Office contributors",
+  "license": "MIT",
+  "main": "desktop/main.cjs",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @agent-office/server && npm run build -w @agent-office/ui",
+    "start": "node packages/server/dist/index.js",
+    "desktop": "electron .",
+    "dist:win": "npm run build && electron-builder --win portable --x64 --config desktop/electron-builder.yml",
+    "test": "npm run build -w @agent-office/server && node --test tests/engine.test.cjs",
+    "test:ui": "node tests/browser.cjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "electron": "39.8.6",
+    "electron-builder": "^26.0.0",
+    "@types/node": "^22.0.0",
+    "playwright": "^1.57.0",
+    "sharp": "^0.34.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Re-Haiyan/momo-office.git"
+  },
+  "homepage": "https://github.com/Re-Haiyan/momo-office"
+}

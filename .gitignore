@@ -1,0 +1,16 @@
+node_modules/
+**/dist/
+output/
+work/
+*.tsbuildinfo
+*.log
+.env
+.env.*
+!.env.example
+data/
+*.db
+*.sqlite
+playwright-report/
+test-results/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,24 @@
+appId: com.momo.office
+productName: Momo Office
+asar: true
+electronVersion: 39.8.6
+npmRebuild: false
+buildDependenciesFromSource: false
+directories:
+  output: output
+files:
+  - desktop/**
+  - packages/server/dist/**
+  - packages/ui/dist/**
+  - LICENSE
+  - package.json
+win:
+  target:
+    - target: portable
+      arch: [x64]
+  icon: desktop/icon.ico
+  signAndEditExecutable: false
+  artifactName: Momo-Office-${version}-Windows.exe
+portable:
+  requestExecutionLevel: user
+  splashImage: false
