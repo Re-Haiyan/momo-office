@@ -146,6 +146,7 @@ class OfficeScene extends Phaser.Scene {
             this.sprites.delete(id);
             this.agentUpdates.delete(id);
           }
+        window.dispatchEvent(new CustomEvent('momo:agents',{detail:state.agents}));
         window.dispatchEvent(new Event("momo:room-ready"));
       } catch {
         console.warn(
@@ -171,6 +172,7 @@ class OfficeScene extends Phaser.Scene {
     group.setSize(32, 48).setInteractive();
     group.on("pointerover", () => {thought.setVisible(true);bubble.setVisible(true);});
     group.on("pointerout", () => {thought.setVisible(false);bubble.setVisible(false);});
+    group.on('pointerup',()=>{if(!this.moved)window.dispatchEvent(new CustomEvent('momo:agent-select',{detail:{id}}));});
     this.sprites.set(id, group);
     let previousX = agent.x,
       previousY = agent.y;

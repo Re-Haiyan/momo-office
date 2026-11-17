@@ -164,7 +164,7 @@ const mock = http.createServer(async (req, res) => {
   await page.screenshot({ path: path.join(screenshots, "Momo-Office.png") });
   await page.getByRole("button", { name: "Open settings" }).click();
   await page
-    .getByRole("button", { name: "Skill library", exact: true })
+    .getByRole("button", { name: "Skills", exact: true })
     .click();
   await page.getByRole("button", { name: "+ Add skill", exact: true }).click();
   await page.getByLabel("Skill name", { exact: true }).fill("Brand voice");

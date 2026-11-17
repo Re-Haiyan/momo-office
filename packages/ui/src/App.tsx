@@ -1,3 +1,6 @@
+import {AgentDialogue} from "./AgentDialogue";
+import {ClockPanel} from "./ClockPanel";
+import {useDisplay} from "./display";
 import {DisplaySettings} from "./DisplaySettings";
 import { sessionHeaders } from "./session";
 import { Advanced } from "./Advanced";
@@ -45,6 +48,7 @@ type Run = {
   result: string;
   error: string;
   createdAt: string;
+  updatedAt?:string;
 };
 type Store = {
   notice?: string;
@@ -97,7 +101,7 @@ function Cat({ small = false }: { small?: boolean }) {
   return (
     <img
       className={small ? "mascot small" : "mascot"}
-      src="/momo-icon.png"
+      src="/art/momo-portrait.png"
       alt="Momo the cat office manager"
       onError={(e) => {
         e.currentTarget.style.display = "none";
@@ -106,6 +110,12 @@ function Cat({ small = false }: { small?: boolean }) {
   );
 }
 export function App() {
+  const {prefs}=useDisplay();
+  const [dialogueId,setDialogueId]=useState('');
+  const [roster,setRoster]=useState(false);
+  const [liveAgents,setLiveAgents]=useState<Record<string,any>>({});
+  const [settingsAgent,setSettingsAgent]=useState<string>();
+  const [focusedOutput,setFocusedOutput]=useState('');
   const [state, setState] = useState<Store>();
   const [connection, setConnection] = useState<Connection>();
   const [networkError, setNetworkError] = useState("");
@@ -151,6 +161,13 @@ export function App() {
       clearInterval(status);
     };
   }, []);
+  useEffect(()=>{
+    const select=(e:Event)=>{setDialogueId((e as CustomEvent).detail.id);setRoster(false);};
+    const status=(e:Event)=>setLiveAgents(Object.fromEntries((e as CustomEvent).detail.map((a:any)=>[a.id,a])));
+    window.addEventListener('momo:agent-select',select);window.addEventListener('momo:agents',status);
+    return()=>{window.removeEventListener('momo:agent-select',select);window.removeEventListener('momo:agents',status);};
+  },[]);
+  useEffect(()=>{document.documentElement.dataset.pixelCursor=String(prefs.pixelCursor);},[prefs.pixelCursor]);
   const run = state?.runs.find((r) => r.id === selected);
   const active = state?.runs.filter((r) => !done(r)) || [];
   const perform = async (fn: () => Promise<unknown>) => {
@@ -185,8 +202,13 @@ export function App() {
   };
   const currentStep = run?.steps.find((s) => s.status === "working");
   const worker = state?.agents.find((a) => a.id === currentStep?.agentId);
+  const dialogueAgent=state?.agents.find(a=>a.id===dialogueId);
+  const outputRun=[...(state?.runs||[])].reverse().find(r=>r.steps.some(s=>s.agentId===dialogueId&&s.output));
+  const lastOutput=outputRun?.steps.filter(s=>s.agentId===dialogueId&&s.output).at(-1)?.output;
+  const message=liveAgents[dialogueId]?.currentTask || (lastOutput?lastOutput.replace(/```[\s\S]*?```/g,'[Code proposal]').slice(0,240):liveAgents[dialogueId]?.thought||'Ready for the next idea.');
+  const today=new Date().toDateString();const completedToday=(state?.runs||[]).filter(r=>['completed','completed_with_warnings'].includes(r.status)&&new Date(r.updatedAt||r.createdAt).toDateString()===today).length;
   return (
-    <div className="momo-app">
+    <div className="momo-app" data-high-contrast={prefs.highContrast}>
       <header className="topbar">
         <div className="brand">
           <Cat small />
@@ -213,24 +235,9 @@ export function App() {
                 ? "Model needed"
                 : "Connecting to Ollama"}
           </span>
-          <button
-            className="icon-button"
-            title="Past requests"
-            aria-label="Past requests"
-            onClick={() => setHistory(!history)}
-          >
-            ◷
-          </button>
-          <button
-            className="icon-button"
-            title="Team, skills and settings"
-            aria-label="Open settings"
-            onClick={() => setSettings(true)}
-          >
-            ⚙
-          </button>
         </div>
       </header>
+      <ClockPanel completed={completedToday}/>
       {networkError && (
         <div className="network-banner" role="alert">
           Office connection lost. {networkError}{" "}
@@ -269,15 +276,15 @@ export function App() {
                 <p className="your-request">You: {run.prompt}</p>
                 {run.plan && !run.result && <p>{run.plan}</p>}
                 {run.steps.length > 0 && (
-                  <details className="team-progress">
+                  <details className="team-progress quest-log" aria-label="Quest log" open>
                     <summary>
                       {run.steps.filter((s) => s.status === "completed").length}{" "}
-                      of {run.steps.length} assignments finished · Team progress
+                      of {run.steps.length} assignments finished · Quest log · Team progress
                     </summary>
                     {run.steps.map((s) => (
-                      <details className="step" key={s.id}>
+                      <details className="step" key={s.id} open={s.id===focusedOutput||undefined}>
                         <summary>
-                          <span className={`step-dot ${s.status}`} />
+                          <span className={`step-dot ${s.status}`} aria-label={s.status}>{s.status==='completed'?'✓':s.status==='failed'?'×':s.status==='working'?'>':'·'}</span>
                           {state?.agents.find((a) => a.id === s.agentId)
                             ?.name || "Teammate"}{" "}
                           · {s.title}
@@ -318,7 +325,7 @@ export function App() {
                     )}
                   </details>
                 )}
-                {run.result && <pre className="result">{run.result}</pre>}
+                {run.result && <section className="reward-panel"><h3>Your reward · the team’s answer</h3><pre className="result">{run.result}</pre></section>}
                 {run.error && (
                   <p className="error" role="alert">
                     {run.error}
@@ -423,6 +430,13 @@ export function App() {
             void send();
           }}
         >
+          <nav className="inventory-bar" aria-label="Office toolbar">
+            <button type="button" className="icon-button" data-tooltip="Settings" title="Settings" aria-label="Open settings" onClick={()=>{setSettingsAgent(undefined);setSettings(true);}}><span className="slot-icon gear-icon" aria-hidden="true"/></button>
+            <button type="button" className="icon-button" data-tooltip="Journal" title="Journal" aria-label="Past requests" onClick={()=>setHistory(!history)}><span className="slot-icon journal-icon" aria-hidden="true"/></button>
+            <button type="button" className="icon-button" data-tooltip="Quest log" title="Quest log" aria-label="Open quest log" disabled={!state?.runs.length} onClick={()=>{setSelected(state!.runs.at(-1)!.id);setCollapsed(false);}}><span className="slot-icon quest-icon" aria-hidden="true"/></button>
+            <button type="button" className="icon-button" data-tooltip="Teammates" title="Talk to a teammate" aria-label="Talk to a teammate" aria-expanded={roster} onClick={()=>setRoster(!roster)}><span className="slot-icon team-icon" aria-hidden="true"/></button>
+            <span className="toolbar-wordmark">MOMO OFFICE <small>small team, big ideas</small></span>
+          </nav>
           <label htmlFor="momo-prompt">
             <span>Ask Momo</span>
             <span className="composer-hint">
@@ -479,7 +493,7 @@ export function App() {
       {history && (
         <aside className="history-panel">
           <div className="panel-title">
-            <h2>Past requests</h2>
+            <h2>Journal</h2>
             <button
               aria-label="Close past requests"
               onClick={() => setHistory(false)}
@@ -506,9 +520,12 @@ export function App() {
           ))}
         </aside>
       )}
+      {roster&&<aside className="agent-roster wood-panel" aria-label="Office teammates"><div className="panel-title"><h2>Say hello</h2><button aria-label="Close teammates" onClick={()=>setRoster(false)}>×</button></div>{state?.agents.map(a=><button key={a.id} onClick={()=>{setDialogueId(a.id);setRoster(false);}} aria-label={`Talk to ${a.name}`}>{a.name}<small>{a.role}</small></button>)}</aside>}
+      {dialogueAgent&&<AgentDialogue agent={dialogueAgent} message={message} hasOutput={!!outputRun} onClose={()=>setDialogueId('')} onOutput={()=>{if(outputRun){setSelected(outputRun.id);setFocusedOutput(outputRun.steps.filter(s=>s.agentId===dialogueId&&s.output).at(-1)!.id);setCollapsed(false);setDialogueId('');}}} onModel={()=>{setSettingsAgent(dialogueId);setDialogueId('');setSettings(true);}}/>}
       {settings && state && (
         <Settings
           state={state}
+          initialAgentId={settingsAgent}
           connection={connection}
           onClose={() => setSettings(false)}
           onRefresh={async () => {
@@ -523,17 +540,19 @@ export function App() {
 
 function Settings({
   state,
+  initialAgentId,
   connection,
   onClose,
   onRefresh,
 }: {
   state: Store;
+  initialAgentId?:string;
   connection?: Connection;
   onClose: () => void;
   onRefresh: () => Promise<void>;
 }) {
   const [tab, setTab] = useState("team");
-  const [agent, setAgent] = useState<Agent>();
+  const [agent, setAgent] = useState<Agent|undefined>(()=>{const a=state.agents.find(a=>a.id===initialAgentId);return a?structuredClone(a):undefined;});
   const [skill, setSkill] = useState<Skill>();
   const [model, setModel] = useState(state.settings.model);
   const [url, setUrl] = useState(state.settings.ollamaUrl);
@@ -628,10 +647,10 @@ function Settings({
                 : t === "providers"
                   ? "Providers"
                   : t === "model"
-                    ? "AI & app"
+                    ? "Models"
                     : t === "team"
                       ? "Teammates"
-                      : "Skill library"}
+                      : "Skills"}
             </button>
           ))}
         </nav>

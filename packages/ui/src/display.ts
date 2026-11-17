@@ -1,8 +1,8 @@
 import {useEffect,useState} from 'react';
 export type Season='spring'|'summer'|'fall'|'winter';
-export type DisplayPrefs={weather:'off'|'rain'|'leaves';season:'auto'|Season};
-const defaults:DisplayPrefs={weather:'off',season:'auto'};
-const validate=(v:any):DisplayPrefs=>({weather:['off','rain','leaves'].includes(v?.weather)?v.weather:'off',season:['auto','spring','summer','fall','winter'].includes(v?.season)?v.season:'auto'});
+export type DisplayPrefs={weather:'off'|'rain'|'leaves';season:'auto'|Season;pixelCursor:boolean;highContrast:boolean};
+const defaults:DisplayPrefs={weather:'off',season:'auto',pixelCursor:true,highContrast:false};
+const validate=(v:any):DisplayPrefs=>({weather:['off','rain','leaves'].includes(v?.weather)?v.weather:'off',pixelCursor:v?.pixelCursor!==false,highContrast:v?.highContrast===true,season:['auto','spring','summer','fall','winter'].includes(v?.season)?v.season:'auto'});
 let current={...defaults};try{current=validate(JSON.parse(localStorage.getItem('momo-display')||'{}'));}catch{}
 export const getDisplay=()=>({...current});
 export const reducedMotion=()=>window.matchMedia('(prefers-reduced-motion: reduce)').matches;
