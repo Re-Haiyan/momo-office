@@ -1,3 +1,4 @@
+import {sound} from "./sound";
 import {AgentDialogue} from "./AgentDialogue";
 import {ClockPanel} from "./ClockPanel";
 import {useDisplay} from "./display";
@@ -127,6 +128,8 @@ export function App() {
   const [settings, setSettings] = useState(false);
   const [history, setHistory] = useState(false);
   const [busy, setBusy] = useState(false);
+  const completeSounds=useRef<Set<string>>();
+  useEffect(()=>sound.install(),[]);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const load = async () => {
     try {
@@ -200,6 +203,12 @@ export function App() {
       setBusy(false);
     }
   };
+  useEffect(()=>{
+    if(!state)return;
+    const completed=state.runs.filter(r=>['completed','completed_with_warnings'].includes(r.status)).map(r=>r.id);
+    if(completeSounds.current){if(completed.some(id=>!completeSounds.current!.has(id)))sound.complete();}
+    completeSounds.current=new Set(completed);
+  },[state]);
   const currentStep = run?.steps.find((s) => s.status === "working");
   const worker = state?.agents.find((a) => a.id === currentStep?.agentId);
   const dialogueAgent=state?.agents.find(a=>a.id===dialogueId);

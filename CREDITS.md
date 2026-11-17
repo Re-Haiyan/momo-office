@@ -18,3 +18,4 @@ Phaser, React and other software dependencies retain their respective package li
 | Seasonal windows, lamp glows, rain and leaf particles | Original code in `tileset.ts` and `Atmosphere.ts` | MIT |
 | Wooden/book 9-slice frames, inventory icons, pixel cursors, React cat portrait | Original rectangles and pixel drawings in `scripts/build-hud-art.py` | MIT |
 | Sun/moon HUD dial and book/wood panel styling | Original CSS in `momo.css` | MIT |
+| Click, dialogue tones, completion jingle, room tone and 16-note looping melody | Original Web Audio synthesis in `packages/ui/src/sound.ts`; no recordings/samples | MIT |
