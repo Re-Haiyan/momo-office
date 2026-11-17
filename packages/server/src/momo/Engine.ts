@@ -481,7 +481,7 @@ export class MomoEngine {
       throw new Error(
         "Finish or cancel queued work before changing the model.",
       );
-    const v = value as Settings;
+    const v = this.pool.secrets.safe(value) as Settings;
     const settings = {
       model: clean(v?.model, 100),
       ollamaUrl: clean(v?.ollamaUrl, 100).replace(/\/$/, ""),
@@ -492,7 +492,7 @@ export class MomoEngine {
     return settings;
   }
   agent(value: unknown, id?: string) {
-    const v = value as TeamAgent;
+    const v = this.pool.secrets.safe(value) as TeamAgent;
     const existing = this.store.agents.find((a) => a.id === id);
     if (id && !existing) throw new Error("Agent not found.");
     if (!id && this.store.agents.length >= 10)
@@ -552,7 +552,7 @@ export class MomoEngine {
   skill(value: unknown, id?: string) {
     if (this.store.runs.some((r) => !terminal(r)))
       throw new Error("Finish or cancel queued work before changing skills.");
-    const v = value as Skill;
+    const v = this.pool.secrets.safe(value) as Skill;
     const existing = this.store.skills.find((s) => s.id === id);
     if (id && !existing) throw new Error("Skill not found.");
     if (!existing && this.store.skills.length >= 40)
@@ -675,6 +675,7 @@ export class MomoEngine {
     agent?: TeamAgent,
   ) {
     signal.throwIfAborted();
+    messages = this.pool.secrets.safe(messages);
     const run = this.store.runs.find((r) => r.id === this.activeRun);
     const reviewing = run?.status === "reviewing";
     const authors = reviewing

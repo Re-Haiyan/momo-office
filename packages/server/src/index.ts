@@ -49,4 +49,11 @@ initializeMomo()
     const port = (httpServer.address() as any).port;
     if (process.send) process.send({ type: "ready", port });
     console.log(`Momo Office ready at http://127.0.0.1:${port}`);
+  })
+  .catch(() => {
+    // Corrupt JSON can include a source excerpt: never print raw initialization errors.
+    console.error(
+      "Momo Office could not initialize. Check the saved data file and local server port.",
+    );
+    process.exit(1);
   });
