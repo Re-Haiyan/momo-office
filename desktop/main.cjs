@@ -105,6 +105,8 @@ async function startServer() {
         PORT: "0",
         MOMO_MODE: "1",
         MOMO_DESKTOP: "1",
+        MOMO_API_TOKEN: token,
+        NODE_ENV: "production",
         GEMINI_API_KEY: "",
         GROQ_API_KEY: "",
         OPENROUTER_API_KEY: "",
@@ -221,6 +223,7 @@ function createOfficeWindow() {
       nodeIntegration: false,
       sandbox: true,
       webviewTag: false,
+      additionalArguments: [`--momo-api-token=${token}`],
       backgroundThrottling: false,
     },
   });
@@ -367,6 +370,7 @@ app.on("before-quit", (event) => {
         method: "POST",
         headers: {
           "X-Office-Token": token,
+          "X-Momo-Token": token,
           "Content-Type": "application/json",
         },
         body: "{}",

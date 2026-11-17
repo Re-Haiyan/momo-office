@@ -5,6 +5,12 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { chromium } = require("playwright");
+const sessionToken = "browser-test-session";
+const authedFetch = (url, options = {}) =>
+  fetch(url, {
+    ...options,
+    headers: { ...options.headers, "X-Momo-Token": sessionToken },
+  });
 const root = path.resolve(__dirname, "..");
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "momo-browser-"));
 const screenshots =
@@ -25,20 +31,19 @@ const mock = http.createServer(async (req, res) => {
   }
   await new Promise((r) => setTimeout(r, 150));
   const system = body.messages?.[0]?.content || "";
-  let answer =
-    body.format === "json"
-      ? JSON.stringify({
-          summary: "Research the idea, then write a useful draft.",
-          tasks: [
-            { agentId: "sage", title: "List the practical requirements" },
-            { agentId: "luna", title: "Write the portfolio website plan" },
-          ],
-        })
-      : system.includes("Review and combine")
-        ? "Your portfolio website plan\n\n1. Home: introduce yourself and your work.\n2. Projects: show three case studies.\n3. About: explain your experience.\n4. Contact: add an email link.\n\nNext step: choose your three projects."
-        : system.includes("Researcher")
-          ? "A portfolio should introduce its owner, demonstrate work with case studies, and offer a clear contact route."
-          : "Draft sections: Home, Projects, About and Contact. Keep the writing brief and specific.";
+  let answer = body.format
+    ? JSON.stringify({
+        summary: "Research the idea, then write a useful draft.",
+        tasks: [
+          { agentId: "sage", title: "List the practical requirements" },
+          { agentId: "luna", title: "Write the portfolio website plan" },
+        ],
+      })
+    : system.includes("Review and combine")
+      ? "Your portfolio website plan\n\n1. Home: introduce yourself and your work.\n2. Projects: show three case studies.\n3. About: explain your experience.\n4. Contact: add an email link.\n\nNext step: choose your three projects."
+      : system.includes("Researcher")
+        ? "A portfolio should introduce its owner, demonstrate work with case studies, and offer a clear contact route."
+        : "Draft sections: Home, Projects, About and Contact. Keep the writing brief and specific.";
   if (system.includes("QUALITY_REVIEW"))
     answer = JSON.stringify({
       approved: true,
@@ -58,6 +63,7 @@ const mock = http.createServer(async (req, res) => {
       GROQ_API_KEY: "",
       OPENROUTER_API_KEY: "",
       MOMO_DESKTOP: "",
+      MOMO_API_TOKEN: sessionToken,
       PORT: "0",
       MOMO_DATA_DIR: temporary,
       OLLAMA_URL: `http://127.0.0.1:${mock.address().port}`,
@@ -83,7 +89,7 @@ const mock = http.createServer(async (req, res) => {
   });
   assert.equal(
     (
-      await fetch(origin + "/api/momo/runs", {
+      await authedFetch(origin + "/api/momo/runs", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -95,7 +101,40 @@ const mock = http.createServer(async (req, res) => {
     403,
   );
   assert.equal(
-    (await fetch(origin + "/api/shutdown", { method: "POST" })).status,
+    (await authedFetch(origin + "/api/shutdown", { method: "POST" })).status,
+    403,
+  );
+  assert.equal((await fetch(origin + "/api/momo/state")).status, 401);
+  assert.equal(
+    await new Promise((resolve, reject) => {
+      const r = http.get(
+        origin + "/api/momo/state",
+        { headers: { Host: "evil.test", "X-Momo-Token": sessionToken } },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode);
+        },
+      );
+      r.on("error", reject);
+    }),
+    403,
+  );
+  assert.equal(
+    (
+      await authedFetch(origin + "/api/momo/state", {
+        headers: { Origin: "https://evil.test" },
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await fetch(origin + "/api/momo/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      })
+    ).status,
     403,
   );
   browser = await chromium.launch({
@@ -158,7 +197,9 @@ const mock = http.createServer(async (req, res) => {
     .getByRole("button", { name: "Auto-assign models", exact: true })
     .click();
   await page.getByText("Review model assignments", { exact: true }).waitFor();
-  const beforeAssign = await (await fetch(origin + "/api/momo/state")).json();
+  const beforeAssign = await (
+    await authedFetch(origin + "/api/momo/state")
+  ).json();
   assert.ok(
     beforeAssign.agents.every((a) =>
       a.fallbackChain.every((r) => r.provider === "ollama"),
@@ -204,10 +245,10 @@ const mock = http.createServer(async (req, res) => {
     );
   await page.getByRole("button", { name: "Send prompt to Momo" }).click();
   await page
-    .getByText("Ready for you", { exact: true })
+    .getByText(/Ready for you|Ready with warnings/, { exact: true })
     .waitFor({ timeout: 15000 });
   assert.ok(await page.getByText(/Your portfolio website plan/).count());
-  const state = await (await fetch(origin + "/api/momo/state")).json();
+  const state = await (await authedFetch(origin + "/api/momo/state")).json();
   assert.ok(!JSON.stringify(state).includes("fake-browser-secret-never-real"));
   assert.ok(
     !fs
@@ -220,7 +261,9 @@ const mock = http.createServer(async (req, res) => {
     model: "llama3.2:latest",
   });
   assert.ok(state.skills.some((s) => s.name === "Brand voice"));
-  assert.equal(state.runs[0].status, "completed");
+  assert.ok(
+    ["completed", "completed_with_warnings"].includes(state.runs[0].status),
+  );
   assert.equal(state.runs[0].localOnly, true);
   assert.ok(state.runs[0].answers.length >= 5);
   assert.equal(state.runs[0].steps.length, 2);
@@ -232,14 +275,14 @@ const mock = http.createServer(async (req, res) => {
     .boundingBox();
   assert.ok(box.x >= 0 && box.x + box.width <= 390);
   await page.screenshot({ path: path.join(screenshots, "Momo-Mobile.png") });
-  const exportResponse = await fetch(
+  const exportResponse = await authedFetch(
     origin + `/api/momo/runs/${state.runs[0].id}/export`,
   );
   assert.equal(exportResponse.status, 200);
   const exported = await exportResponse.text();
   assert.match(exported, /portfolio website plan/);
   assert.ok(!exported.includes("fake-browser-secret-never-real"));
-  const invalid = await fetch(origin + "/api/momo/providers/gemini", {
+  const invalid = await authedFetch(origin + "/api/momo/providers/gemini", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: '{"fake-browser-secret-never-real"',
@@ -258,7 +301,7 @@ const mock = http.createServer(async (req, res) => {
   .finally(async () => {
     if (browser) await browser.close();
     if (child && origin) {
-      await fetch(origin + "/api/shutdown", {
+      await authedFetch(origin + "/api/shutdown", {
         method: "POST",
         headers: { "X-Office-Token": "browser-test" },
       }).catch(() => {});

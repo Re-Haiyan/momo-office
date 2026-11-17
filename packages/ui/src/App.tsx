@@ -1,3 +1,4 @@
+import { sessionHeaders } from "./session";
 import { Advanced } from "./Advanced";
 import { Providers, ChainEditor, AutoAssign, ModelRef } from "./Providers";
 import React, { useEffect, useRef, useState } from "react";
@@ -75,9 +76,12 @@ const phase: Record<string, string> = {
 async function api(path: string, method = "GET", body?: unknown) {
   const response = await fetch(`/api/momo${path}`, {
     method,
+    headers: {
+      ...sessionHeaders(),
+      ...(method !== "GET" ? { "Content-Type": "application/json" } : {}),
+    },
     ...(method !== "GET"
       ? {
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body || {}),
         }
       : {}),

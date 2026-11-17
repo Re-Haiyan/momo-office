@@ -654,6 +654,18 @@ test("mock streaming completions expose and persist partial work and cancel mid-
   const r = e.submit("Stream");
   for (let n = 0; n < 50 && !partial; n++) await wait(10);
   assert.equal(e.snapshot().runs[0].steps[0].output, "Partial work");
+  for (let n = 0; n < 100; n++) {
+    try {
+      if (
+        readFileSync(
+          path.join(e.directory, "momo-office.json"),
+          "utf8",
+        ).includes("Partial work")
+      )
+        break;
+    } catch {}
+    await wait(10);
+  }
   assert.match(
     readFileSync(path.join(e.directory, "momo-office.json"), "utf8"),
     /Partial work/,
@@ -720,4 +732,61 @@ test("advanced settings validate timeout, generation reserve and keep-alive", (t
     keepAlive: "10m",
   });
   assert.equal(updated.numCtx, 16384);
+});
+
+test("router and upgrade security reject bad Host/Origin, missing tokens and unauthenticated writes", () => {
+  const { checkRequest } = require("../packages/server/dist/momo/security");
+  const token = "test-session-token";
+  const req = (headers = {}, method = "GET") => ({
+    headers: { host: "127.0.0.1:3000", ...headers },
+    method,
+    socket: { localPort: 3000 },
+  });
+  assert.equal(checkRequest(req(), token), 401);
+  assert.equal(checkRequest(req({ "x-momo-token": token }), token), 0);
+  assert.equal(
+    checkRequest(req({ host: "evil.test", "x-momo-token": token }), token),
+    403,
+  );
+  assert.equal(
+    checkRequest(req({ host: "localhost:99", "x-momo-token": token }), token),
+    403,
+  );
+  assert.equal(
+    checkRequest(
+      req({ origin: "https://evil.test", "x-momo-token": token }),
+      token,
+    ),
+    403,
+  );
+  assert.equal(checkRequest(req({}, "POST"), token, false), 403);
+  assert.equal(checkRequest(req({ "x-momo-token": token }, "POST"), token), 0);
+  assert.equal(
+    checkRequest(
+      req({ cookie: `momo-session=${token}`, origin: "http://127.0.0.1:3000" }),
+      token,
+    ),
+    0,
+  );
+  assert.equal(
+    checkRequest(
+      req({ origin: "http://localhost:5173", "x-momo-token": token }),
+      token,
+      true,
+      false,
+    ),
+    403,
+  );
+  assert.equal(
+    checkRequest(
+      req({ origin: "http://localhost:5173", "x-momo-token": token }),
+      token,
+      true,
+      true,
+    ),
+    0,
+  );
+  assert.doesNotThrow(() =>
+    checkRequest(req({ "x-momo-token": "é".repeat(token.length) }), token),
+  );
 });

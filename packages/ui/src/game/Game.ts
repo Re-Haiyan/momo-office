@@ -1,3 +1,4 @@
+import { sessionHeaders } from "../session";
 import Phaser from "phaser";
 import * as Colyseus from "colyseus.js";
 import { OfficeState, AgentState } from "./schema";
@@ -20,7 +21,11 @@ class OfficeScene extends Phaser.Scene {
         frameHeight: 32,
       });
     this.load.image("momo-cat", "/momo-icon.png");
-    this.load.json("office-layout", "/api/momo/office");
+    this.load.json({
+      key: "office-layout",
+      url: "/api/momo/office",
+      xhrSettings: { responseType: "text", headers: sessionHeaders() },
+    });
   }
   private fitOffice() {
     const width = this.scale.width,
@@ -105,6 +110,7 @@ class OfficeScene extends Phaser.Scene {
     try {
       this.room = await new Colyseus.Client(
         `${protocol}//${window.location.hostname}:${port}`,
+        { headers: sessionHeaders() },
       ).joinOrCreate<OfficeState>("office");
       this.room.onStateChange.once((state) => {
         state.agents.onAdd((agent: AgentState, id: string) =>

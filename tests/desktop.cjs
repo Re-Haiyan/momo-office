@@ -70,9 +70,16 @@ const assert = require("node:assert/strict");
       "function",
     );
     console.log("Desktop UI and preload are ready");
+    const apiToken = await window.evaluate(() => window.momoDesktop.apiToken);
+    assert.ok(apiToken.length >= 32);
+    const authFetch = (url, options = {}) =>
+      fetch(url, {
+        ...options,
+        headers: { ...options.headers, "X-Momo-Token": apiToken },
+      });
     const url = window.url();
     assert.ok(url.startsWith("http://127.0.0.1:"));
-    const state = await (await fetch(url + "api/momo/state")).json();
+    const state = await (await authFetch(url + "api/momo/state")).json();
     assert.equal(state.agents.length, 8);
     if (process.platform === "win32") {
       const fakeKey = "momo-desktop-test-not-a-real-provider-key";
@@ -82,7 +89,7 @@ const assert = require("node:assert/strict");
       );
       assert.equal(saved.hasKey, true);
       const providerState = await (
-        await fetch(url + "api/momo/providers")
+        await authFetch(url + "api/momo/providers")
       ).json();
       assert.equal(
         providerState.providers.find((p) => p.id === "gemini").hasKey,
@@ -91,7 +98,7 @@ const assert = require("node:assert/strict");
       assert.ok(!JSON.stringify(providerState).includes(fakeKey));
       assert.ok(
         !JSON.stringify(
-          await (await fetch(url + "api/momo/state")).json(),
+          await (await authFetch(url + "api/momo/state")).json(),
         ).includes(fakeKey),
       );
       const encrypted = fs.readFileSync(

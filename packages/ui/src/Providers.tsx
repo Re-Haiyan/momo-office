@@ -1,3 +1,4 @@
+import { sessionHeaders } from "./session";
 import React, { useEffect, useState } from "react";
 export type ModelRef = {
   provider: "ollama" | "gemini" | "groq" | "openrouter";
@@ -10,10 +11,13 @@ export async function providerApi(
 ) {
   const r = await fetch("/api/momo" + path, {
     method,
+    headers: {
+      ...sessionHeaders(),
+      ...(method !== "GET" ? { "Content-Type": "application/json" } : {}),
+    },
     ...(method === "GET"
       ? {}
       : {
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body || {}),
         }),
   });
