@@ -579,3 +579,145 @@ test("search settings allow only configured local SearXNG and validated provider
     /Invalid search/,
   );
 });
+
+test("resume reuses completed steps, restarts the failed step, and does not replan", async (t) => {
+  let plans = 0,
+    pip = 0,
+    luna = 0,
+    fail = true;
+  const e = fixture(t, async (messages, _s, _signal, json) => {
+    if (json) {
+      plans++;
+      return JSON.stringify({
+        tasks: [
+          { agentId: "pip", title: "First" },
+          { agentId: "luna", title: "Second" },
+        ],
+      });
+    }
+    if (messages[0].content.includes("You are Pip")) {
+      pip++;
+      return "First completed";
+    }
+    if (messages[0].content.includes("You are Luna")) {
+      luna++;
+      if (fail) throw new Error("intentional failure");
+      return "Recovered second";
+    }
+    return "Intro";
+  });
+  const submitted = e.submit("Two steps");
+  let r = await settled(e);
+  assert.equal(r.status, "failed");
+  assert.equal(r.resumable, true);
+  assert.equal(r.steps[0].status, "completed");
+  fail = false;
+  e.resume(submitted.id);
+  r = await settled(e);
+  assert.equal(r.status, "completed");
+  assert.equal(plans, 1);
+  assert.equal(pip, 1);
+  assert.equal(luna, 2);
+  assert.equal(e.snapshot().runs.length, 1);
+});
+test("mock streaming completions expose and persist partial work and cancel mid-stream", async (t) => {
+  let partial;
+  const e = fixture(
+    t,
+    async (_messages, _settings, signal, json, onPartial) => {
+      if (json)
+        return JSON.stringify({ tasks: [{ agentId: "pip", title: "Stream" }] });
+      onPartial?.("Partial work");
+      partial = true;
+      await new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      });
+      return "";
+    },
+  );
+  // fixture forwards the optional partial callback just like the real provider.
+  const original = e.complete;
+  e.complete = (messages, settings, signal, json, onPartial) =>
+    json
+      ? original(messages, settings, signal, json, onPartial)
+      : Promise.resolve().then(() => {
+          onPartial("Partial work");
+          partial = true;
+          return new Promise((_, reject) =>
+            signal.addEventListener("abort", () => reject(signal.reason), {
+              once: true,
+            }),
+          );
+        });
+  const r = e.submit("Stream");
+  for (let n = 0; n < 50 && !partial; n++) await wait(10);
+  assert.equal(e.snapshot().runs[0].steps[0].output, "Partial work");
+  assert.match(
+    readFileSync(path.join(e.directory, "momo-office.json"), "utf8"),
+    /Partial work/,
+  );
+  e.cancel(r.id);
+  assert.equal((await settled(e)).status, "cancelled");
+});
+test("Ollama NDJSON stream continues length once and honors settings without live inference", async (t) => {
+  const {
+    ollamaComplete,
+  } = require("../packages/server/dist/momo/providers/ollama");
+  const original = global.fetch;
+  t.after(() => (global.fetch = original));
+  let calls = 0;
+  const bodies = [];
+  global.fetch = async (_url, options) => {
+    bodies.push(JSON.parse(options.body));
+    const n = ++calls;
+    return new Response(
+      JSON.stringify({
+        message: { content: n === 1 ? "hello " : "world" },
+        done: true,
+        done_reason: n === 1 ? "length" : "stop",
+      }) + "\n",
+      { headers: { "Content-Type": "application/x-ndjson" } },
+    );
+  };
+  const partial = [];
+  const output = await ollamaComplete(
+    [{ role: "user", content: "Write" }],
+    {
+      model: "mock",
+      ollamaUrl: "http://127.0.0.1:11434",
+      numCtx: 8192,
+      numPredict: 1024,
+      keepAlive: "10m",
+    },
+    new AbortController().signal,
+    false,
+    (text) => partial.push(text),
+  );
+  assert.equal(output, "hello world");
+  assert.equal(calls, 2);
+  assert.equal(bodies[0].stream, true);
+  assert.equal(bodies[0].options.num_predict, 1024);
+  assert.equal(partial.at(-1), "hello world");
+});
+test("advanced settings validate timeout, generation reserve and keep-alive", (t) => {
+  const e = fixture(t, async () => "");
+  const settings = e.snapshot().settings;
+  for (const patch of [
+    { numCtx: 100 },
+    { numPredict: 9000 },
+    { temperature: 3 },
+    { timeoutMs: 0 },
+    { idleTimeoutMs: 0 },
+    { keepAlive: "forever" },
+  ])
+    assert.throws(() => e.settings({ ...settings, ...patch }));
+  const updated = e.settings({
+    ...settings,
+    numCtx: 16384,
+    numPredict: 1024,
+    keepAlive: "10m",
+  });
+  assert.equal(updated.numCtx, 16384);
+});

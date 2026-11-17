@@ -21,6 +21,7 @@ export type Request = {
   signal: AbortSignal;
   json?: boolean;
   schema?: object;
+  onPartial?: (text: string) => void;
 };
 export type Answer = { text: string; model: string; family: string };
 export interface ModelProvider {

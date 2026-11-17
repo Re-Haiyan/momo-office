@@ -1,3 +1,4 @@
+import { Advanced } from "./Advanced";
 import { Providers, ChainEditor, AutoAssign, ModelRef } from "./Providers";
 import React, { useEffect, useRef, useState } from "react";
 import "./momo.css";
@@ -29,6 +30,7 @@ type Run = {
   plan: string;
   steps: Step[];
   notice?: string;
+  resumable?: boolean;
   localOnly?: boolean;
   warnings?: string[];
   answers?: (ModelRef & { agentId: string; stage: string })[];
@@ -47,7 +49,7 @@ type Store = {
   agents: Agent[];
   skills: Skill[];
   runs: Run[];
-  settings: { model: string; ollamaUrl: string };
+  settings: { model: string; ollamaUrl: string; [key: string]: any };
 };
 type Connection = { connected: boolean; ready: boolean; models: string[] };
 const done = (run: Run) =>
@@ -353,6 +355,21 @@ export function App() {
                           </a>
                         </>
                       )}
+                      {run.status === "failed" && (
+                        <button
+                          disabled={busy}
+                          onClick={async () => {
+                            try {
+                              await api(`/runs/${run.id}/resume`, "POST");
+                              await load();
+                            } catch (e: any) {
+                              setError(e.message);
+                            }
+                          }}
+                        >
+                          Resume
+                        </button>
+                      )}
                       <button disabled={busy} onClick={() => send(run.prompt)}>
                         Try again
                       </button>
@@ -588,7 +605,7 @@ function Settings({
           </button>
         </div>
         <nav className="tabs">
-          {["team", "skills", "providers", "model"].map((t) => (
+          {["team", "skills", "providers", "advanced", "model"].map((t) => (
             <button
               key={t}
               className={t === tab ? "active" : ""}
@@ -600,13 +617,15 @@ function Settings({
                 setError("");
               }}
             >
-              {t === "providers"
-                ? "Providers"
-                : t === "model"
-                  ? "AI & app"
-                  : t === "team"
-                    ? "Teammates"
-                    : "Skill library"}
+              {t === "advanced"
+                ? "Advanced"
+                : t === "providers"
+                  ? "Providers"
+                  : t === "model"
+                    ? "AI & app"
+                    : t === "team"
+                      ? "Teammates"
+                      : "Skill library"}
             </button>
           ))}
         </nav>
@@ -622,6 +641,9 @@ function Settings({
             </p>
           )}
           {tab === "providers" && <Providers />}
+          {tab === "advanced" && (
+            <Advanced settings={state.settings} onSaved={onRefresh} />
+          )}
           {tab === "team" && !agent && (
             <>
               <div className="section-heading">
@@ -646,6 +668,18 @@ function Settings({
                   + Add agent
                 </button>
               </div>
+              {new Set(
+                state.agents.flatMap((a) =>
+                  (a.fallbackChain || [])
+                    .filter((r) => r.provider === "ollama")
+                    .map((r) => r.model),
+                ),
+              ).size > 2 && (
+                <p className="error">
+                  More than two local models are assigned. Switching models can
+                  use extra RAM and slow the queue.
+                </p>
+              )}
               <AutoAssign onSaved={onRefresh} />
               <div className="agent-grid">
                 {state.agents.map((a) => (

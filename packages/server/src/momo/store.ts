@@ -28,6 +28,11 @@ export function migrate(value: any): Store {
     saved.version = 3;
   }
   saved.settings.numCtx ??= 8192;
+  saved.settings.timeoutMs ??= 240000;
+  saved.settings.idleTimeoutMs ??= 90000;
+  saved.settings.temperature ??= 0.35;
+  saved.settings.numPredict ??= 2048;
+  saved.settings.keepAlive ??= "10m";
   saved.settings.finalMode ??= "assemble";
   saved.settings.search ??= { provider: "duckduckgo" };
   return saved;

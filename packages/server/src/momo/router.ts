@@ -151,3 +151,8 @@ momoRouter.post(
   "/auto-assign/apply",
   action((req) => momo.applyAssignments(req.body.agents)),
 );
+
+momoRouter.post(
+  "/runs/:id/resume",
+  action((req) => momo.resume(req.params.id)),
+);

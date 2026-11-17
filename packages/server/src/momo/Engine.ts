@@ -49,6 +49,7 @@ export interface Step {
   answers?: Trace[];
 }
 export interface Run {
+  resumable?: boolean;
   localOnly?: boolean;
   answers?: Trace[];
   warnings?: string[];
@@ -83,6 +84,11 @@ export interface Run {
 export interface Settings {
   model: string;
   numCtx?: number;
+  timeoutMs?: number;
+  idleTimeoutMs?: number;
+  temperature?: number;
+  numPredict?: number;
+  keepAlive?: string;
   finalMode?: "assemble" | "rewrite";
   search?: SearchSettings;
   ollamaUrl: string;
@@ -101,6 +107,7 @@ export type Complete = (
   settings: Settings,
   signal: AbortSignal,
   json?: boolean | object,
+  onPartial?: (text: string) => void,
 ) => Promise<string>;
 
 const initialSkills: Skill[] = [
@@ -274,6 +281,11 @@ export class MomoEngine {
       runs: [],
       settings: {
         numCtx: 8192,
+        timeoutMs: 240000,
+        idleTimeoutMs: 90000,
+        temperature: 0.35,
+        numPredict: 2048,
+        keepAlive: "10m",
         finalMode: "assemble",
         search: { provider: "duckduckgo" },
         model: process.env.OLLAMA_MODEL || "llama3.2:latest",
@@ -499,6 +511,30 @@ export class MomoEngine {
     return this.snapshot();
   }
   private validateSettings(value: Settings) {
+    for (const [key, min, max, defaultValue] of [
+      ["timeoutMs", 1000, 3600000, 240000],
+      ["idleTimeoutMs", 1000, 600000, 90000],
+      ["numPredict", 128, 32768, 2048],
+    ] as const)
+      if (
+        !Number.isInteger(value[key] ?? defaultValue) ||
+        (value[key] ?? defaultValue) < min ||
+        (value[key] ?? defaultValue) > max
+      )
+        throw new Error(`Invalid ${key}.`);
+    if (
+      !Number.isFinite(value.temperature ?? 0.35) ||
+      (value.temperature ?? 0.35) < 0 ||
+      (value.temperature ?? 0.35) > 2
+    )
+      throw new Error("Temperature must be between 0 and 2.");
+    if (
+      value.keepAlive !== undefined &&
+      !/^(0|[1-9][0-9]{0,3}[smh])$/.test(value.keepAlive)
+    )
+      throw new Error("keepAlive must be 0 or a duration such as 10m.");
+    if ((value.numPredict ?? 2048) >= (value.numCtx ?? 8192))
+      throw new Error("numPredict must be smaller than numCtx.");
     if (
       value.finalMode !== undefined &&
       !["assemble", "rewrite"].includes(value.finalMode)
@@ -527,6 +563,12 @@ export class MomoEngine {
       );
     const v = this.pool.secrets.safe(value) as Settings;
     const settings = {
+      timeoutMs: v?.timeoutMs ?? this.store.settings.timeoutMs ?? 240000,
+      idleTimeoutMs:
+        v?.idleTimeoutMs ?? this.store.settings.idleTimeoutMs ?? 90000,
+      temperature: v?.temperature ?? this.store.settings.temperature ?? 0.35,
+      numPredict: v?.numPredict ?? this.store.settings.numPredict ?? 2048,
+      keepAlive: v?.keepAlive ?? this.store.settings.keepAlive ?? "10m",
       finalMode: v?.finalMode ?? this.store.settings.finalMode ?? "assemble",
       search: validateSearch(
         v?.search || this.store.settings.search || { provider: "duckduckgo" },
@@ -663,6 +705,27 @@ export class MomoEngine {
     this.schedule();
     return this.pool.secrets.safe(run);
   }
+  resume(id: string) {
+    const run = this.store.runs.find((r) => r.id === id);
+    if (!run || run.status !== "failed")
+      throw new Error("Only failed/interrupted runs can resume.");
+    if (this.store.runs.filter((r) => !terminal(r)).length >= 5)
+      throw new Error("The request queue is full.");
+    run.status = "queued";
+    run.resumable = false;
+    run.error = "";
+    run.result = "";
+    run.review = undefined;
+    for (const step of run.steps)
+      if (step.status !== "completed") {
+        step.status = "queued";
+        step.output = "";
+        step.sources = [];
+      }
+    this.touch(run);
+    this.schedule();
+    return this.pool.secrets.safe(run);
+  }
   cancel(id: string) {
     const run = this.store.runs.find((r) => r.id === id);
     if (!run) throw new Error("Request not found.");
@@ -694,6 +757,7 @@ export class MomoEngine {
       } catch (e: any) {
         if (run.status !== "cancelled") {
           run.status = "failed";
+          run.resumable = true;
           run.error =
             e.name === "TimeoutError"
               ? "The model took too long. Try a smaller model or a shorter request."
@@ -730,7 +794,7 @@ export class MomoEngine {
     const budget = budgetMessages(
       messages,
       this.store.settings.numCtx ?? 8192,
-      2048,
+      this.store.settings.numPredict ?? 2048,
     );
     messages = budget.messages;
     if (budget.trimmed && run) {
@@ -742,6 +806,20 @@ export class MomoEngine {
     const authors = reviewing
       ? run?.steps.flatMap((s) => s.answers || []) || []
       : [];
+    let lastPartial = 0;
+    const onPartial = (text: string) => {
+      signal.throwIfAborted();
+      const step = run?.steps.find(
+        (s) => s.status === "working" && s.agentId === agent?.id,
+      );
+      if (step) {
+        step.output = this.pool.secrets.redact(text).slice(0, 200000);
+        if (Date.now() - lastPartial >= 250) {
+          lastPartial = Date.now();
+          this.touch(run!);
+        }
+      }
+    };
     let answer;
     if (this.complete) {
       // Legacy injected local completion retained for deterministic engine tests.
@@ -759,6 +837,7 @@ export class MomoEngine {
             },
             signal,
             json,
+            onPartial,
           );
           break;
         } catch (e: any) {
@@ -793,6 +872,7 @@ export class MomoEngine {
           signal,
           json: !!json,
           schema: typeof json === "object" ? json : undefined,
+          onPartial,
         },
         run?.localOnly === true,
         authors,
@@ -876,55 +956,61 @@ export class MomoEngine {
   private async execute(run: Run, signal: AbortSignal) {
     const manager = this.store.agents.find((a) => a.id === "momo")!;
     const team = this.store.agents.filter((a) => a.id !== "momo");
-    run.status = "planning";
-    this.touch(run);
-    const plan = await this.structured(
-      [
-        {
-          role: "system",
-          content: `${this.agentPrompt(manager)}\nPlan work for this team. Return JSON only: {"summary":"brief explanation","tasks":[{"agentId":"exact listed id","title":"specific assignment with sufficient detail"}]}. Use 1 to 5 tasks, in dependency order. Later specialists receive earlier results. Optionally set dependsOn to indexes of earlier tasks; omitted means all earlier tasks. Choose agents by their role and skills. Do not invent agent IDs. Team: ${JSON.stringify(team.map((a) => ({ id: a.id, name: a.name, role: a.role, skills: a.skills.map((id) => this.store.skills.find((s) => s.id === id)?.name), instructions: a.instructions.slice(0, 1200) })))}`,
-        },
-        {
-          role: "user",
-          content: `${contextBlock(run.context || "")}\nCurrent request: ${run.prompt}`,
-        },
-      ],
-      signal,
-      planSchema(team.map((a) => a.id)),
-      manager,
-      (value) =>
-        validatePlan(
-          value,
-          team.map((a) => a.id),
-        ),
-    );
-    if (
-      !Array.isArray(plan.tasks) ||
-      !plan.tasks.length ||
-      plan.tasks.length > 5
-    )
-      throw new Error(
-        "Momo did not return a plan with one to five tasks. Retry this request.",
+    if (!run.steps.length) {
+      run.status = "planning";
+      this.touch(run);
+      const plan = await this.structured(
+        [
+          {
+            role: "system",
+            content: `${this.agentPrompt(manager)}\nPlan work for this team. Return JSON only: {"summary":"brief explanation","tasks":[{"agentId":"exact listed id","title":"specific assignment with sufficient detail"}]}. Use 1 to 5 tasks, in dependency order. Later specialists receive earlier results. Optionally set dependsOn to indexes of earlier tasks; omitted means all earlier tasks. Choose agents by their role and skills. Do not invent agent IDs. Team: ${JSON.stringify(team.map((a) => ({ id: a.id, name: a.name, role: a.role, skills: a.skills.map((id) => this.store.skills.find((s) => s.id === id)?.name), instructions: a.instructions.slice(0, 1200) })))}`,
+          },
+          {
+            role: "user",
+            content: `${contextBlock(run.context || "")}\nCurrent request: ${run.prompt}`,
+          },
+        ],
+        signal,
+        planSchema(team.map((a) => a.id)),
+        manager,
+        (value) =>
+          validatePlan(
+            value,
+            team.map((a) => a.id),
+          ),
       );
-    run.plan = clean(plan.summary, 1500);
-    run.steps = plan.tasks.map((task: any) => {
-      if (!team.some((a) => a.id === task.agentId) || !clean(task.title, 3000))
+      if (
+        !Array.isArray(plan.tasks) ||
+        !plan.tasks.length ||
+        plan.tasks.length > 5
+      )
         throw new Error(
-          "The plan named an unknown teammate or empty task. Retry this request.",
+          "Momo did not return a plan with one to five tasks. Retry this request.",
         );
-      return {
-        id: randomUUID(),
-        agentId: task.agentId,
-        title: clean(task.title, 3000),
-        dependsOn: task.dependsOn,
-        status: "queued",
-        output: "",
-        sources: [],
-      };
-    });
+      run.plan = clean(plan.summary, 1500);
+      run.steps = plan.tasks.map((task: any) => {
+        if (
+          !team.some((a) => a.id === task.agentId) ||
+          !clean(task.title, 3000)
+        )
+          throw new Error(
+            "The plan named an unknown teammate or empty task. Retry this request.",
+          );
+        return {
+          id: randomUUID(),
+          agentId: task.agentId,
+          title: clean(task.title, 3000),
+          dependsOn: task.dependsOn,
+          status: "queued",
+          output: "",
+          sources: [],
+        };
+      });
+    }
     run.status = "working";
     this.touch(run);
     for (const step of run.steps) {
+      if (step.status === "completed") continue;
       signal.throwIfAborted();
       const agent = team.find((a) => a.id === step.agentId)!;
       step.status = "working";
@@ -988,7 +1074,7 @@ export class MomoEngine {
           );
         }
       }
-      step.output = output.slice(0, 24000);
+      step.output = output.slice(0, 200000);
       step.status = "completed";
       this.touch(run);
     }
@@ -1071,7 +1157,7 @@ export class MomoEngine {
           false,
           specialist,
         )
-      ).slice(0, 24000);
+      ).slice(0, 200000);
       step.status = "completed";
       run.status = "reviewing";
       this.touch(run);
