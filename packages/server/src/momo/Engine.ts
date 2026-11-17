@@ -1,3 +1,18 @@
+import {
+  ModelRef,
+  Trace,
+  CloudId,
+  ProviderSettings,
+  family,
+} from "./providers/types";
+import {
+  ProviderPool,
+  defaultProviderSettings,
+} from "./providers/ProviderPool";
+import { createPool } from "./providers/createPool";
+import { Secrets, cloudIds } from "./providers/secrets";
+import { providersConfig, lastVerified } from "./providers/providers.config";
+export { ollamaComplete } from "./providers/ollama";
 import fs from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
@@ -8,7 +23,8 @@ export interface Skill {
   instructions: string;
 }
 export interface TeamAgent {
-  model?: string;
+  model?: ModelRef;
+  fallbackChain?: ModelRef[];
   id: string;
   name: string;
   role: string;
@@ -24,8 +40,12 @@ export interface Step {
   status: "queued" | "working" | "completed" | "failed";
   output: string;
   sources: string[];
+  answers?: Trace[];
 }
 export interface Run {
+  localOnly?: boolean;
+  answers?: Trace[];
+  warnings?: string[];
   id: string;
   prompt: string;
   status:
@@ -59,6 +79,7 @@ export interface Settings {
 }
 export interface Store {
   version: number;
+  providers: Record<CloudId, ProviderSettings>;
   agents: TeamAgent[];
   skills: Skill[];
   runs: Run[];
@@ -211,44 +232,9 @@ export const terminal = (run: Run) =>
 const clean = (value: unknown, max: number) =>
   typeof value === "string" ? value.trim().slice(0, max) : "";
 
-export async function ollamaComplete(
-  messages: { role: string; content: string }[],
-  settings: Settings,
-  signal: AbortSignal,
-  json = false,
-): Promise<string> {
-  const combined = AbortSignal.any([signal, AbortSignal.timeout(240000)]);
-  const response = await fetch(`${settings.ollamaUrl}/api/chat`, {
-    method: "POST",
-    signal: combined,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: settings.model,
-      messages,
-      stream: false,
-      ...(json ? { format: "json" } : {}),
-      options: { temperature: 0.35, num_ctx: 8192, num_predict: 2048 },
-    }),
-  });
-  if (!response.ok)
-    throw Object.assign(
-      new Error(
-        `Ollama returned ${response.status}. Check that ${settings.model} is installed and Ollama is running.`,
-      ),
-      { retryable: response.status >= 500 || response.status === 429 },
-    );
-  const data = await response.json();
-  if (data.error) throw new Error(data.error);
-  const content = data.message?.content?.trim();
-  if (!content)
-    throw new Error(
-      "Ollama returned an empty answer. Try a different model in Settings.",
-    );
-  return content;
-}
-
 export class MomoEngine {
   public store: Store;
+  public pool: ProviderPool;
   private processing = false;
   private controller?: AbortController;
   private activeRun?: string;
@@ -257,12 +243,15 @@ export class MomoEngine {
   private worker?: Promise<void>;
   constructor(
     public readonly directory: string,
-    private complete: Complete = ollamaComplete,
+    private complete?: Complete,
+    pool?: ProviderPool,
+    secrets?: Secrets,
   ) {
     fs.mkdirSync(directory, { recursive: true });
     this.file = path.join(directory, "momo-office.json");
     this.store = {
-      version: 1,
+      version: 2,
+      providers: defaultProviderSettings(),
       agents: structuredClone(initialAgents),
       skills: structuredClone(initialSkills),
       runs: [],
@@ -274,7 +263,7 @@ export class MomoEngine {
     if (fs.existsSync(this.file)) {
       const saved = JSON.parse(fs.readFileSync(this.file, "utf8")) as Store;
       if (
-        saved.version !== 1 ||
+        ![1, 2].includes(saved.version) ||
         !Array.isArray(saved.runs) ||
         !Array.isArray(saved.agents) ||
         !Array.isArray(saved.skills) ||
@@ -285,6 +274,21 @@ export class MomoEngine {
         );
       this.validateSettings(saved.settings);
       this.store = saved;
+      this.store.providers = Object.fromEntries(
+        cloudIds.map((id) => [
+          id,
+          { ...defaultProviderSettings()[id], ...saved.providers?.[id] },
+        ]),
+      ) as Store["providers"];
+      for (const a of this.store.agents) {
+        if (typeof a.model === "string")
+          a.model = { provider: "ollama", model: a.model };
+        a.fallbackChain = this.normalizeChain(
+          a.fallbackChain || (a.model ? [a.model] : []),
+        );
+        a.model = a.fallbackChain[0];
+      }
+      this.store.version = 2;
       for (const run of this.store.runs)
         if (!terminal(run)) {
           run.status = "failed";
@@ -294,15 +298,173 @@ export class MomoEngine {
             if (step.status === "working") step.status = "failed";
         }
     }
+    this.pool = pool || createPool(directory, () => this.store, secrets);
+    for (const a of this.store.agents) {
+      a.fallbackChain = this.normalizeChain(a.fallbackChain || []);
+      a.model = a.fallbackChain[0];
+    }
+    this.store = this.pool.secrets.safe(this.store);
     this.save();
   }
   private save() {
     const temp = `${this.file}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(this.store, null, 2), "utf8");
+    fs.writeFileSync(
+      temp,
+      JSON.stringify(this.pool.secrets.safe(this.store), null, 2),
+      "utf8",
+    );
     fs.renameSync(temp, this.file);
   }
   snapshot() {
-    return structuredClone(this.store);
+    return this.pool.secrets.safe(this.store);
+  }
+  normalizeChain(value: unknown): ModelRef[] {
+    const refs = Array.isArray(value) ? value : [];
+    if (refs.length > 8) throw new Error("Use at most eight fallback entries.");
+    const result: ModelRef[] = [];
+    for (const ref of refs) {
+      if (
+        !ref ||
+        !["ollama", ...cloudIds].includes(ref.provider) ||
+        typeof ref.model !== "string" ||
+        !/^[a-zA-Z0-9._:/-]{1,150}$/.test(ref.model)
+      )
+        throw new Error("Invalid provider or model reference.");
+      if (ref.provider === "openrouter" && !ref.model.endsWith(":free"))
+        throw new Error("OpenRouter accepts explicit :free models only.");
+      if (
+        !result.some(
+          (r) => r.provider === ref.provider && r.model === ref.model,
+        )
+      )
+        result.push({ provider: ref.provider, model: ref.model });
+    }
+    const local = result.find((r) => r.provider === "ollama") || {
+      provider: "ollama" as const,
+      model: this.store.settings.model,
+    };
+    return [...result.filter((r) => r.provider !== "ollama"), local];
+  }
+  providerState() {
+    return {
+      lastVerified,
+      desktop: process.env.MOMO_DESKTOP === "1",
+      providers: cloudIds.map((id) => ({
+        id,
+        ...this.store.providers[id],
+        hasKey: Boolean(this.pool.secrets.get(id)),
+        usage: this.pool.status(id),
+        models: this.pool.models(id),
+        docs: providersConfig[id].docs,
+        keyURL: providersConfig[id].keyURL,
+        privacy: providersConfig[id].privacy,
+        quotaNote: providersConfig[id].quotaNote,
+      })),
+    };
+  }
+  configureProvider(id: CloudId, value: any) {
+    if (!cloudIds.includes(id)) throw new Error("Unknown provider.");
+    if (this.store.runs.some((r) => !terminal(r)))
+      throw new Error(
+        "Finish or cancel queued work before changing providers.",
+      );
+    const old = this.store.providers[id];
+    const dailyCap = Number(value.dailyCap);
+    const rpm =
+      value.rpm === null || value.rpm === "" ? null : Number(value.rpm);
+    if (
+      !Number.isInteger(dailyCap) ||
+      dailyCap < 0 ||
+      dailyCap > 1000000 ||
+      (rpm !== null && (!Number.isInteger(rpm) || rpm < 1 || rpm > 100000))
+    )
+      throw new Error("Enter valid request caps.");
+    const consented = old.consented || value.consented === true;
+    if (value.enabled === true && (!consented || !dailyCap))
+      throw new Error(
+        "Confirm the provider data policy and set a positive daily cap before enabling cloud.",
+      );
+    const selectedModel = clean(value.selectedModel, 150),
+      codeModel = clean(value.codeModel, 150);
+    for (const model of [selectedModel, codeModel])
+      if (model) this.normalizeChain([{ provider: id, model }]);
+    this.store.providers[id] = {
+      enabled: value.enabled === true,
+      consented,
+      dailyCap,
+      rpm,
+      selectedModel,
+      codeModel,
+    };
+    this.save();
+    return this.providerState();
+  }
+  async autoAssign() {
+    const warnings: string[] = [];
+    for (const id of cloudIds)
+      if (this.pool.enabled(id)) {
+        try {
+          await this.pool.discover(id);
+        } catch {
+          warnings.push(`${id}: model list unavailable; omitted.`);
+        }
+      }
+    const pick = (id: CloudId, code = false): ModelRef[] => {
+      const config = this.store.providers[id];
+      const models = this.pool
+        .models(id)
+        .filter((m) => m.json && (!code || m.code));
+      const selected =
+        models.find(
+          (m) => m.id === (code ? config.codeModel : config.selectedModel),
+        ) || models[0];
+      return this.pool.enabled(id) && selected
+        ? [{ provider: id, model: selected.id }]
+        : [];
+    };
+    const agents = this.store.agents.map((a) => {
+      const order: CloudId[] =
+        a.id === "momo"
+          ? ["gemini", "openrouter"]
+          : a.id === "sage"
+            ? ["gemini", "groq"]
+            : a.id === "echo"
+              ? ["openrouter", "gemini"]
+              : ["groq", "gemini"];
+      const local = a.fallbackChain?.find((r) => r.provider === "ollama") || {
+        provider: "ollama" as const,
+        model: this.store.settings.model,
+      };
+      return {
+        id: a.id,
+        name: a.name,
+        fallbackChain: this.normalizeChain([
+          ...order.flatMap((id) => pick(id, a.id === "pip" && id === "groq")),
+          local,
+        ]),
+      };
+    });
+    warnings.push(
+      "Only enabled, consented providers with verified free models are included. Echo selects a different known family at review time.",
+    );
+    return { agents, warnings };
+  }
+  applyAssignments(value: any) {
+    if (this.store.runs.some((r) => !terminal(r)))
+      throw new Error("Finish or cancel queued work before changing the team.");
+    if (!Array.isArray(value) || value.length !== this.store.agents.length)
+      throw new Error("Review every teammate before applying.");
+    const changes = this.store.agents.map((a) => {
+      const candidate = value.find((v: any) => v.id === a.id);
+      if (!candidate) throw new Error("Missing teammate.");
+      return { a, chain: this.normalizeChain(candidate.fallbackChain) };
+    });
+    for (const { a, chain } of changes) {
+      a.fallbackChain = chain;
+      a.model = chain[0];
+    }
+    this.save();
+    return this.snapshot();
   }
   private validateSettings(value: Settings) {
     if (!/^[a-zA-Z0-9._:/-]{1,100}$/.test(value.model))
@@ -342,7 +504,17 @@ export class MomoEngine {
       name: clean(v?.name, 32),
       role: existing?.id === "momo" ? "Team coordinator" : clean(v?.role, 80),
       instructions: clean(v?.instructions, 6000),
-      model: clean(v?.model, 100) || undefined,
+      model:
+        typeof v?.model === "string"
+          ? { provider: "ollama", model: clean(v.model, 100) }
+          : v?.model,
+      fallbackChain: this.normalizeChain(
+        typeof v?.model === "string"
+          ? v.model
+            ? [{ provider: "ollama", model: v.model }]
+            : []
+          : v?.fallbackChain || (v?.model ? [v.model] : []),
+      ),
       skills: Array.isArray(v?.skills)
         ? [...new Set(v.skills)].filter((s) =>
             this.store.skills.some((k) => k.id === s),
@@ -351,10 +523,7 @@ export class MomoEngine {
       webSearch: existing?.id === "momo" ? false : v?.webSearch === true,
       color: /^#[a-f\d]{6}$/i.test(v?.color) ? v.color : "#a4b6ef",
     };
-    if (agent.model && !/^[a-zA-Z0-9._:/-]{1,100}$/.test(agent.model))
-      throw new Error(
-        "Enter a valid Ollama model tag, or leave it empty to use the office model.",
-      );
+    agent.model = agent.fallbackChain![0];
     if (!agent.name || !agent.role)
       throw new Error("Name and role are required.");
     if (
@@ -401,7 +570,7 @@ export class MomoEngine {
     this.save();
     return skill;
   }
-  submit(prompt: unknown, parentId?: string) {
+  submit(prompt: unknown, parentId?: string, localOnly = false) {
     const text = clean(prompt, 12000);
     if (!text) throw new Error("Tell Momo what you would like the team to do.");
     if (this.store.runs.filter((r) => !terminal(r)).length >= 5)
@@ -415,7 +584,10 @@ export class MomoEngine {
       throw new Error("The earlier request was not found.");
     const run: Run = {
       id: randomUUID(),
-      prompt: text,
+      prompt: this.pool.secrets.redact(text),
+      localOnly: localOnly || parent?.localOnly === true,
+      answers: [],
+      warnings: [],
       context: parent
         ? `Earlier request: ${parent.prompt}\nEarlier work and questions: ${parent.result}\n${parent.steps
             .map((step) => step.output)
@@ -439,7 +611,7 @@ export class MomoEngine {
     }
     this.save();
     this.schedule();
-    return structuredClone(run);
+    return this.pool.secrets.safe(run);
   }
   cancel(id: string) {
     const run = this.store.runs.find((r) => r.id === id);
@@ -502,40 +674,85 @@ export class MomoEngine {
     json = false,
     agent?: TeamAgent,
   ) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      signal.throwIfAborted();
-      try {
-        const result = await this.complete(
-          messages,
-          {
-            ...this.store.settings,
-            model: agent?.model || this.store.settings.model,
-          },
-          signal,
-          json,
-        );
-        signal.throwIfAborted();
-        const run = this.store.runs.find((r) => r.id === this.activeRun);
-        if (run?.notice) {
-          run.notice = "";
-          this.touch(run);
-        }
-        return result;
-      } catch (error: any) {
-        signal.throwIfAborted();
-        const temporary =
-          error.name === "TypeError" ||
-          error.name === "TimeoutError" ||
-          error.retryable;
-        if (attempt || !temporary) throw error;
-        const run = this.store.runs.find((r) => r.id === this.activeRun);
-        if (run) {
-          run.notice = "The model was interrupted. Trying this step once more…";
-          this.touch(run);
+    signal.throwIfAborted();
+    const run = this.store.runs.find((r) => r.id === this.activeRun);
+    const reviewing = run?.status === "reviewing";
+    const authors = reviewing
+      ? run?.steps.flatMap((s) => s.answers || []) || []
+      : [];
+    let answer;
+    if (this.complete) {
+      // Legacy injected local completion retained for deterministic engine tests.
+      let text = "";
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          text = await this.complete(
+            messages,
+            {
+              ...this.store.settings,
+              model:
+                agent?.model?.provider === "ollama"
+                  ? agent.model.model
+                  : this.store.settings.model,
+            },
+            signal,
+            json,
+          );
+          break;
+        } catch (e: any) {
+          signal.throwIfAborted();
+          if (
+            attempt ||
+            !(
+              e.retryable ||
+              e.name === "TypeError" ||
+              e.name === "TimeoutError"
+            )
+          )
+            throw e;
         }
       }
+      const model =
+        agent?.model?.provider === "ollama"
+          ? agent.model.model
+          : this.store.settings.model;
+      answer = {
+        text,
+        provider: "ollama" as const,
+        model,
+        family: family(model),
+        warning: undefined,
+      };
+    } else {
+      answer = await this.pool.complete(
+        this.normalizeChain(agent?.fallbackChain || []),
+        { messages, signal, json },
+        run?.localOnly === true,
+        authors,
+        reviewing,
+      );
     }
-    throw new Error("The model did not respond after retrying.");
+    signal.throwIfAborted();
+    const step = run?.steps.find(
+      (s) => s.status === "working" && s.agentId === agent?.id,
+    );
+    const trace: Trace = {
+      provider: answer.provider,
+      model: answer.model,
+      family: answer.family,
+      agentId: agent?.id || "momo",
+      stage: run?.status || "unknown",
+      stepId: step?.id,
+      at: new Date().toISOString(),
+    };
+    if (run) {
+      (run.answers ||= []).push(trace);
+      if (step) (step.answers ||= []).push(trace);
+      if (answer.warning && !run.warnings?.includes(answer.warning))
+        (run.warnings ||= []).push(answer.warning);
+      this.touch(run);
+    }
+    return this.pool.secrets.redact(answer.text);
   }
 
   private parse(text: string) {
@@ -649,7 +866,7 @@ export class MomoEngine {
       const messages = [
         {
           role: "system",
-          content: `${this.agentPrompt(agent)}\n${agent.webSearch ? 'If live lookup is required, reply with JSON {"searchQuery":"short search query"}. Otherwise provide your completed work directly.' : "Web access is disabled for you. Do not claim live verification."}`,
+          content: `${this.agentPrompt(agent)}\n${agent.webSearch && !run.localOnly ? 'If live lookup is required, reply with JSON {"searchQuery":"short search query"}. Otherwise provide your completed work directly.' : "Web access is disabled for you. Do not claim live verification."}`,
         },
         {
           role: "user",
@@ -657,7 +874,7 @@ export class MomoEngine {
         },
       ];
       let output = await this.ask(messages, signal, false, agent);
-      if (agent.webSearch) {
+      if (agent.webSearch && !run.localOnly) {
         let query = "";
         try {
           query = clean(
@@ -812,7 +1029,9 @@ export class MomoEngine {
     this.touch(run);
   }
   markdown(run: Run) {
-    return `# ${run.prompt}\n\n${run.result || "(No final answer yet.)"}\n\n---\n## Team plan\n${run.plan}\n\n${run.steps.map((s) => `### ${this.store.agents.find((a) => a.id === s.agentId)?.name || s.agentId}: ${s.title}\n\n${s.output}\n${s.sources.length ? "\nSources:\n" + s.sources.join("\n") : ""}`).join("\n\n")}`;
+    return this.pool.secrets.redact(
+      `# ${run.prompt}\n\n${run.result || "(No final answer yet.)"}\n\n---\n## Team plan\n${run.plan}\n\n${run.steps.map((s) => `### ${this.store.agents.find((a) => a.id === s.agentId)?.name || s.agentId}: ${s.title}\n\n${s.output}\n${s.sources.length ? "\nSources:\n" + s.sources.join("\n") : ""}`).join("\n\n")}\n\n## Model provenance\n${(run.answers || []).map((a) => `${a.stage} / ${a.agentId}: ${a.provider} / ${a.model}`).join("\n")}\n${(run.warnings || []).join("\n")}`,
+    );
   }
   activity(id: string) {
     const run = this.store.runs.find(

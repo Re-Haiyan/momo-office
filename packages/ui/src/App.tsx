@@ -1,9 +1,11 @@
+import { Providers, ChainEditor, AutoAssign, ModelRef } from "./Providers";
 import React, { useEffect, useRef, useState } from "react";
 import "./momo.css";
 
 type Skill = { id: string; name: string; instructions: string };
 type Agent = {
-  model?: string;
+  model?: ModelRef;
+  fallbackChain?: ModelRef[];
   id: string;
   name: string;
   role: string;
@@ -27,6 +29,9 @@ type Run = {
   plan: string;
   steps: Step[];
   notice?: string;
+  localOnly?: boolean;
+  warnings?: string[];
+  answers?: (ModelRef & { agentId: string; stage: string })[];
   review?: {
     by: string;
     feedback: string;
@@ -90,6 +95,7 @@ export function App() {
   const [connection, setConnection] = useState<Connection>();
   const [networkError, setNetworkError] = useState("");
   const [error, setError] = useState("");
+  const [localOnly, setLocalOnly] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [selected, setSelected] = useState("");
   const [collapsed, setCollapsed] = useState(false);
@@ -148,6 +154,7 @@ export function App() {
     try {
       const result: Run = await api("/runs", "POST", {
         prompt: text,
+        localOnly,
         parentId:
           run?.status === "needs_input" && text === prompt ? run.id : undefined,
       });
@@ -348,6 +355,24 @@ export function App() {
             )}
           </article>
         )}
+        {run?.warnings?.map((w) => (
+          <p key={w} className="error" role="status">
+            {w}
+          </p>
+        ))}
+        {run?.answers?.length ? (
+          <details className="provenance">
+            <summary>
+              Models used ·{" "}
+              {run.localOnly ? "Local only" : "Configured fallback chain"}
+            </summary>
+            {run.answers.map((a, i) => (
+              <p key={i}>
+                {a.stage} · {a.agentId}: {a.provider} / {a.model}
+              </p>
+            ))}
+          </details>
+        ) : null}
         {error && (
           <div className="error-toast" role="alert">
             {error}
@@ -402,6 +427,14 @@ export function App() {
               {busy ? "…" : "↑"}
             </button>
           </div>
+          <label className="checkbox local-only">
+            <input
+              type="checkbox"
+              checked={localOnly}
+              onChange={(e) => setLocalOnly(e.target.checked)}
+            />
+            Local only · block cloud models and web lookup for this request
+          </label>
           <div className="composer-footer">
             <span>Momo delegates · Specialists work · One answer for you</span>
             <span>Enter to send · Shift + Enter for a new line</span>
@@ -542,7 +575,7 @@ function Settings({
           </button>
         </div>
         <nav className="tabs">
-          {["team", "skills", "model"].map((t) => (
+          {["team", "skills", "providers", "model"].map((t) => (
             <button
               key={t}
               className={t === tab ? "active" : ""}
@@ -554,11 +587,13 @@ function Settings({
                 setError("");
               }}
             >
-              {t === "model"
-                ? "AI & app"
-                : t === "team"
-                  ? "Teammates"
-                  : "Skill library"}
+              {t === "providers"
+                ? "Providers"
+                : t === "model"
+                  ? "AI & app"
+                  : t === "team"
+                    ? "Teammates"
+                    : "Skill library"}
             </button>
           ))}
         </nav>
@@ -573,6 +608,7 @@ function Settings({
               {notice}
             </p>
           )}
+          {tab === "providers" && <Providers />}
           {tab === "team" && !agent && (
             <>
               <div className="section-heading">
@@ -597,6 +633,7 @@ function Settings({
                   + Add agent
                 </button>
               </div>
+              <AutoAssign onSaved={onRefresh} />
               <div className="agent-grid">
                 {state.agents.map((a) => (
                   <button
@@ -612,7 +649,12 @@ function Settings({
                     </span>
                     <strong>{a.name}</strong>
                     <span>{a.role}</span>
-                    <small>{a.model || "Office default model"}</small>
+                    <small className="model-badge">
+                      {a.model?.provider && a.model.provider !== "ollama"
+                        ? "Cloud"
+                        : "Local"}{" "}
+                      · {a.model?.model || "Office default model"}
+                    </small>
                     <small>
                       {a.skills
                         .map(
@@ -625,8 +667,9 @@ function Settings({
               </div>
               <p className="muted">
                 Momo receives your prompts and delegates to specialists. Add up
-                to ten teammates. Each can use its own installed Ollama model,
-                or share the office default. Requests still run one at a time.
+                to ten teammates. Each can use an ordered model fallback chain.
+                Cloud providers require opt-in in Providers. Requests run one at
+                a time.
               </p>
             </>
           )}
@@ -682,12 +725,34 @@ function Settings({
                 Ollama model (optional)
                 <input
                   list="agent-models"
-                  value={agent.model || ""}
+                  value={
+                    agent.fallbackChain?.find((r) => r.provider === "ollama")
+                      ?.model ||
+                    (agent.model?.provider === "ollama"
+                      ? agent.model.model
+                      : "")
+                  }
                   maxLength={100}
                   placeholder={`Office default: ${state.settings.model}`}
-                  onChange={(e) =>
-                    setAgent({ ...agent, model: e.target.value })
-                  }
+                  onChange={(e) => {
+                    const local = {
+                      provider: "ollama" as const,
+                      model: e.target.value || state.settings.model,
+                    };
+                    setAgent({
+                      ...agent,
+                      model:
+                        agent.model?.provider === "ollama"
+                          ? local
+                          : agent.model,
+                      fallbackChain: [
+                        ...(agent.fallbackChain || []).filter(
+                          (r) => r.provider !== "ollama",
+                        ),
+                        local,
+                      ],
+                    });
+                  }}
                 />
                 <datalist id="agent-models">
                   {connection?.models.map((m) => (
@@ -695,20 +760,13 @@ function Settings({
                   ))}
                 </datalist>
               </label>
-              <p className="muted">
-                Leave this empty to share the office model. Pick an installed
-                model to specialize this agent.{" "}
-                {agent.model &&
-                  !connection?.models.some(
-                    (m) => m === agent.model || m === agent.model + ":latest",
-                  ) && (
-                    <>
-                      Not installed yet? Run{" "}
-                      <code>ollama pull {agent.model}</code> in PowerShell, then
-                      check the connection again.
-                    </>
-                  )}
-              </p>
+              <ChainEditor
+                chain={agent.fallbackChain || []}
+                localModel={state.settings.model}
+                onChange={(chain) =>
+                  setAgent({ ...agent, fallbackChain: chain, model: chain[0] })
+                }
+              />
               <label>
                 Instructions
                 <textarea

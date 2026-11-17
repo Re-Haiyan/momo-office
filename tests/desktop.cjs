@@ -74,6 +74,48 @@ const assert = require("node:assert/strict");
     assert.ok(url.startsWith("http://127.0.0.1:"));
     const state = await (await fetch(url + "api/momo/state")).json();
     assert.equal(state.agents.length, 8);
+    if (process.platform === "win32") {
+      const fakeKey = "momo-desktop-test-not-a-real-provider-key";
+      const saved = await window.evaluate(
+        async (key) => window.momoDesktop.setProviderKey("gemini", key),
+        fakeKey,
+      );
+      assert.equal(saved.hasKey, true);
+      const providerState = await (
+        await fetch(url + "api/momo/providers")
+      ).json();
+      assert.equal(
+        providerState.providers.find((p) => p.id === "gemini").hasKey,
+        true,
+      );
+      assert.ok(!JSON.stringify(providerState).includes(fakeKey));
+      assert.ok(
+        !JSON.stringify(
+          await (await fetch(url + "api/momo/state")).json(),
+        ).includes(fakeKey),
+      );
+      const encrypted = fs.readFileSync(
+        path.join(temporary, "provider-keys.encrypted.json"),
+        "utf8",
+      );
+      assert.ok(!encrypted.includes(fakeKey));
+      assert.ok(
+        !fs
+          .readFileSync(path.join(temporary, "office/momo-office.json"), "utf8")
+          .includes(fakeKey),
+      );
+      assert.ok(
+        !fs
+          .readFileSync(path.join(temporary, "office/desktop.log"), "utf8")
+          .includes(fakeKey),
+      );
+      await window.evaluate(() =>
+        window.momoDesktop.setProviderKey("gemini", ""),
+      );
+      console.log(
+        "PASS: safeStorage ciphertext, IPC key retrieval, write-only state and key removal. No cloud requests.",
+      );
+    }
     console.log("Stopping the desktop app");
     await Promise.race([
       app.close(),

@@ -340,10 +340,10 @@ test("planner, specialist, correction and reviewer use their assigned local mode
     { ...engine.store.agents.find((a) => a.id === "pip"), model: "" },
     "pip",
   );
-  assert.equal(
-    engine.store.agents.find((a) => a.id === "pip").model,
-    undefined,
-  );
+  assert.deepEqual(engine.store.agents.find((a) => a.id === "pip").model, {
+    provider: "ollama",
+    model: engine.store.settings.model,
+  });
   assert.throws(
     () =>
       engine.agent(
@@ -353,6 +353,6 @@ test("planner, specialist, correction and reviewer use their assigned local mode
         },
         "pip",
       ),
-    /valid Ollama/,
+    /Invalid provider or model/,
   );
 });

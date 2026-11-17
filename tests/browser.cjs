@@ -54,6 +54,10 @@ const mock = http.createServer(async (req, res) => {
     cwd: temporary,
     env: {
       ...process.env,
+      GEMINI_API_KEY: "fake-browser-secret-never-real",
+      GROQ_API_KEY: "",
+      OPENROUTER_API_KEY: "",
+      MOMO_DESKTOP: "",
       PORT: "0",
       MOMO_DATA_DIR: temporary,
       OLLAMA_URL: `http://127.0.0.1:${mock.address().port}`,
@@ -150,23 +154,75 @@ const mock = http.createServer(async (req, res) => {
     .getByRole("button", { name: "Save teammate", exact: true })
     .click();
   await page.getByRole("button", { name: /Pip/ }).waitFor();
+  await page
+    .getByRole("button", { name: "Auto-assign models", exact: true })
+    .click();
+  await page.getByText("Review model assignments", { exact: true }).waitFor();
+  const beforeAssign = await (await fetch(origin + "/api/momo/state")).json();
+  assert.ok(
+    beforeAssign.agents.every((a) =>
+      a.fallbackChain.every((r) => r.provider === "ollama"),
+    ),
+  );
+  await page
+    .getByRole("button", { name: "Discard preview", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Providers", exact: true }).click();
+  await page
+    .getByLabel("Enable this cloud provider", { exact: true })
+    .first()
+    .waitFor();
+  assert.equal(
+    await page
+      .getByLabel("Enable this cloud provider", { exact: true })
+      .count(),
+    3,
+  );
+  for (const box of await page
+    .getByLabel("Enable this cloud provider", { exact: true })
+    .all())
+    assert.equal(await box.isChecked(), false);
+  assert.equal(
+    await page
+      .getByLabel("API key (write-only)", { exact: true })
+      .first()
+      .isDisabled(),
+    true,
+  );
+  await page.screenshot({ path: path.join(screenshots, "Providers.png") });
   await page.getByRole("button", { name: "Close settings" }).click();
   await page
+    .getByLabel(
+      "Local only · block cloud models and web lookup for this request",
+      { exact: true },
+    )
+    .check();
+  await page
     .getByRole("textbox", { name: "Ask Momo" })
-    .fill("Write a plan for my portfolio website");
+    .fill(
+      "Write a plan for my portfolio website fake-browser-secret-never-real",
+    );
   await page.getByRole("button", { name: "Send prompt to Momo" }).click();
   await page
     .getByText("Ready for you", { exact: true })
     .waitFor({ timeout: 15000 });
   assert.ok(await page.getByText(/Your portfolio website plan/).count());
   const state = await (await fetch(origin + "/api/momo/state")).json();
-  assert.equal(state.agents.length, 9);
-  assert.equal(
-    state.agents.find((a) => a.id === "pip").model,
-    "llama3.2:latest",
+  assert.ok(!JSON.stringify(state).includes("fake-browser-secret-never-real"));
+  assert.ok(
+    !fs
+      .readFileSync(path.join(temporary, "momo-office.json"), "utf8")
+      .includes("fake-browser-secret-never-real"),
   );
+  assert.equal(state.agents.length, 9);
+  assert.deepEqual(state.agents.find((a) => a.id === "pip").model, {
+    provider: "ollama",
+    model: "llama3.2:latest",
+  });
   assert.ok(state.skills.some((s) => s.name === "Brand voice"));
   assert.equal(state.runs[0].status, "completed");
+  assert.equal(state.runs[0].localOnly, true);
+  assert.ok(state.runs[0].answers.length >= 5);
   assert.equal(state.runs[0].steps.length, 2);
   await page.screenshot({ path: path.join(screenshots, "Momo-Answer.png") });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -180,7 +236,16 @@ const mock = http.createServer(async (req, res) => {
     origin + `/api/momo/runs/${state.runs[0].id}/export`,
   );
   assert.equal(exportResponse.status, 200);
-  assert.match(await exportResponse.text(), /portfolio website plan/);
+  const exported = await exportResponse.text();
+  assert.match(exported, /portfolio website plan/);
+  assert.ok(!exported.includes("fake-browser-secret-never-real"));
+  const invalid = await fetch(origin + "/api/momo/providers/gemini", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: '{"fake-browser-secret-never-real"',
+  });
+  assert.equal(invalid.status, 400);
+  assert.ok(!(await invalid.text()).includes("fake-browser-secret-never-real"));
   assert.deepEqual(errors, []);
   console.log(
     "PASS: clean office UI, desktop/mobile layouts, skills, added teammate, prompt routing, specialist results, final answer, export, origin guard, no browser exceptions. AI mocked.",

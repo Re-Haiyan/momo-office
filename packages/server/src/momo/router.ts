@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { momo } from "./instance";
+import { cloudIds } from "./providers/secrets";
+import type { CloudId } from "./providers/types";
 import { officeLayout } from "./OfficeLayout";
 
 export const momoRouter = Router();
@@ -23,11 +25,19 @@ momoRouter.use((req, res, next) => {
   }
   next();
 });
-const action = (fn: (req: any) => unknown) => (req: any, res: any) => {
+momoRouter.use(async (_req, res, next) => {
   try {
-    res.json(fn(req));
+    await momo.pool.secrets.refresh();
+    next();
+  } catch {
+    res.status(503).json({ error: "Provider credentials are unavailable." });
+  }
+});
+const action = (fn: (req: any) => unknown) => async (req: any, res: any) => {
+  try {
+    res.json(momo.pool.secrets.safe(await fn(req)));
   } catch (e: any) {
-    res.status(400).json({ error: e.message });
+    res.status(400).json({ error: momo.pool.secrets.redact(e.message) });
   }
 };
 momoRouter.get("/office", (_req, res) => res.json(officeLayout));
@@ -39,14 +49,21 @@ momoRouter.get("/connection", async (_req, res) => {
     });
     if (!response.ok) throw new Error(`Ollama returned ${response.status}`);
     const data = await response.json();
-    const models = (data.models || []).map((m: any) => m.name);
+    const models = (data.models || []).map((m: any) =>
+      momo.pool.secrets.redact(String(m.name)),
+    );
     res.json({
       connected: true,
       models,
       ready: models.includes(momo.store.settings.model),
     });
   } catch (e: any) {
-    res.json({ connected: false, models: [], ready: false, error: e.message });
+    res.json({
+      connected: false,
+      models: [],
+      ready: false,
+      error: momo.pool.secrets.redact(e.message),
+    });
   }
 });
 momoRouter.post(
@@ -55,6 +72,7 @@ momoRouter.post(
     momo.submit(
       req.body.prompt,
       typeof req.body.parentId === "string" ? req.body.parentId : undefined,
+      req.body.localOnly === true,
     ),
   ),
 );
@@ -103,4 +121,33 @@ momoRouter.put(
 momoRouter.put(
   "/settings",
   action((req) => momo.settings(req.body)),
+);
+
+function provider(id: string): CloudId {
+  if (!cloudIds.includes(id as CloudId)) throw new Error("Unknown provider.");
+  return id as CloudId;
+}
+momoRouter.get(
+  "/providers",
+  action(() => momo.providerState()),
+);
+momoRouter.put(
+  "/providers/:id",
+  action((req) => momo.configureProvider(provider(req.params.id), req.body)),
+);
+momoRouter.post(
+  "/providers/:id/test",
+  action((req) => momo.pool.check(provider(req.params.id))),
+);
+momoRouter.post(
+  "/providers/:id/models",
+  action((req) => momo.pool.discover(provider(req.params.id))),
+);
+momoRouter.post(
+  "/auto-assign/preview",
+  action(() => momo.autoAssign()),
+);
+momoRouter.post(
+  "/auto-assign/apply",
+  action((req) => momo.applyAssignments(req.body.agents)),
 );

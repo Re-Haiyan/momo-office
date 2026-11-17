@@ -1,4 +1,11 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  shell,
+  safeStorage,
+} = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
@@ -28,6 +35,11 @@ app.on("second-instance", () => {
     target.focus();
   }
 });
+const { Credentials } = require("./credentials.cjs");
+const vault = new Credentials(
+  path.join(userData, "provider-keys.encrypted.json"),
+  safeStorage,
+);
 const token = randomUUID();
 const root = path.resolve(__dirname, "..");
 const dataDirectory = () => path.join(app.getPath("userData"), "office");
@@ -92,12 +104,29 @@ async function startServer() {
         NODE_OPTIONS: "",
         PORT: "0",
         MOMO_MODE: "1",
+        MOMO_DESKTOP: "1",
+        GEMINI_API_KEY: "",
+        GROQ_API_KEY: "",
+        OPENROUTER_API_KEY: "",
         MOMO_DATA_DIR: data,
         OFFICE_SHUTDOWN_TOKEN: token,
       },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
     },
   );
+  server.on("message", (message) => {
+    if (
+      message?.type === "vault:get" &&
+      typeof message.id === "string" &&
+      ["gemini", "groq", "openrouter"].includes(message.provider)
+    ) {
+      server.send({
+        type: "vault:reply",
+        id: message.id,
+        key: vault.get(message.provider),
+      });
+    }
+  });
   server.stdout.pipe(log, { end: false });
   server.stderr.pipe(log, { end: false });
   return new Promise((resolve, reject) => {
@@ -221,6 +250,21 @@ if (lock)
   app
     .whenReady()
     .then(async () => {
+      ipcMain.handle("momo:provider-key", (event, provider, key) => {
+        if (
+          !origin ||
+          event.sender !== mainWindow?.webContents ||
+          !event.senderFrame?.url.startsWith(origin + "/")
+        )
+          throw new Error("Invalid credential request.");
+        try {
+          return vault.set(provider, key);
+        } catch {
+          throw new Error(
+            "Could not save key. Check OS encryption and key format.",
+          );
+        }
+      });
       ipcMain.handle("momo:open-data", (event) => {
         if (event.senderFrame?.url.startsWith(origin + "/"))
           return shell.openPath(dataDirectory());

@@ -773,3 +773,55 @@ legend {
     animation: none;
   }
 }
+
+.provider-card {
+  border: 1px solid #61556b;
+  border-radius: 14px;
+  padding: 18px;
+  margin: 18px 0;
+}
+.provider-card select,
+.chain-row select {
+  min-width: 0;
+  width: 100%;
+}
+.provider-card meter {
+  width: 100%;
+}
+.chain-row {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+  margin-bottom: 10px;
+}
+.chain-row label {
+  flex: 1;
+  min-width: 0;
+}
+.model-badge {
+  overflow-wrap: anywhere;
+}
+.assignment-preview {
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+}
+.provenance {
+  padding: 10px 16px;
+  background: #282638;
+  color: #eee;
+  max-height: 200px;
+  overflow: auto;
+  border-radius: 10px;
+}
+.local-only {
+  font-size: 12px;
+  margin-top: 8px;
+}
+@media (max-width: 800px) {
+  .chain-row {
+    flex-wrap: wrap;
+  }
+  .tabs {
+    flex-wrap: wrap;
+  }
+}

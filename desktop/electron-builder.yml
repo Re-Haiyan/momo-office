@@ -7,6 +7,7 @@ buildDependenciesFromSource: false
 directories:
   output: output
 files:
+  - desktop/credentials.cjs
   - desktop/main.cjs
   - desktop/preload.cjs
   - desktop/splash.html
