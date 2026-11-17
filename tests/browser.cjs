@@ -142,6 +142,14 @@ const mock = http.createServer(async (req, res) => {
     .getByRole("button", { name: "Save teammate", exact: true })
     .click();
   await page.getByRole("button", { name: /Kiki/ }).waitFor();
+  await page.getByRole("button", { name: /Pip/ }).click();
+  await page
+    .getByLabel("Ollama model (optional)", { exact: true })
+    .fill("llama3.2:latest");
+  await page
+    .getByRole("button", { name: "Save teammate", exact: true })
+    .click();
+  await page.getByRole("button", { name: /Pip/ }).waitFor();
   await page.getByRole("button", { name: "Close settings" }).click();
   await page
     .getByRole("textbox", { name: "Ask Momo" })
@@ -153,6 +161,10 @@ const mock = http.createServer(async (req, res) => {
   assert.ok(await page.getByText(/Your portfolio website plan/).count());
   const state = await (await fetch(origin + "/api/momo/state")).json();
   assert.equal(state.agents.length, 9);
+  assert.equal(
+    state.agents.find((a) => a.id === "pip").model,
+    "llama3.2:latest",
+  );
   assert.ok(state.skills.some((s) => s.name === "Brand voice"));
   assert.equal(state.runs[0].status, "completed");
   assert.equal(state.runs[0].steps.length, 2);

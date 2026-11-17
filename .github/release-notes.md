@@ -1,8 +1,9 @@
 ## Momo Office for Windows
 
-Download **Momo-Office-0.1.0-Windows.exe** below. It is one portable app: no Node.js, source ZIP or terminal windows are needed. Stop the old office with Ctrl+C in its two PowerShell windows before opening this app. Keep Ollama installed and the `llama3.2` model available.
+Download **Windows .exe** below. It is one portable app: no Node.js, source ZIP or terminal windows are needed. Stop the old office with Ctrl+C in its two PowerShell windows before opening this app. Keep Ollama installed and the `llama3.2` model available.
 
 - One prompt box with Momo coordinating your team.
+- Assign different installed Ollama models to different agents, or share the office default. Local models only; no paid cloud APIs or automatic paid fallbacks.
 - Eight specialists and teammates: Momo, Sage, Pip, Luna, Nova, Coco, Atlas and Echo. Add or customize agents and skills in the gear menu; the office supports ten agents.
 - Specialists pass work to each other; a reviewer can request one correction. Missing essential facts pause the task for your input, preserving partial work. Temporary model failures get one retry.
 - A meeting room, work studio, coffee kitchen, lounge and quiet corner, with task-related movement and door-aware paths.

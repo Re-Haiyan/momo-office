@@ -22,7 +22,7 @@ function fixture(t, complete, review) {
     if (json && messages[0].content.includes("QUALITY_REVIEW"))
       return Promise.resolve(
         review
-          ? review(messages)
+          ? review(messages, settings)
           : JSON.stringify({
               approved: true,
               needsInput: false,
@@ -293,4 +293,66 @@ test("transient model failure is retried once and work continues", async (t) => 
   const result = await settled(engine);
   assert.equal(result.status, "completed");
   assert.equal(attempts, 2);
+});
+
+test("planner, specialist, correction and reviewer use their assigned local models", async (t) => {
+  const calls = [];
+  let reviews = 0;
+  const engine = fixture(
+    t,
+    async (messages, settings, _signal, json) => {
+      calls.push(settings.model);
+      return json
+        ? JSON.stringify({ tasks: [{ agentId: "pip", title: "Propose code" }] })
+        : "Untested code proposal";
+    },
+    (_messages, settings) => {
+      calls.push(settings.model);
+      return JSON.stringify({
+        approved: ++reviews > 1,
+        needsInput: false,
+        feedback: "Clarify assumptions in the proposal.",
+        agentId: "pip",
+      });
+    },
+  );
+  for (const [id, model] of [
+    ["momo", "general-model:7b"],
+    ["pip", "code-model:7b"],
+    ["echo", "review-model:7b"],
+  ])
+    engine.agent(
+      { ...engine.store.agents.find((a) => a.id === id), model },
+      id,
+    );
+  engine.submit("Propose a program");
+  const result = await settled(engine);
+  assert.equal(result.status, "completed");
+  assert.deepEqual(calls, [
+    "general-model:7b",
+    "code-model:7b",
+    "review-model:7b",
+    "code-model:7b",
+    "review-model:7b",
+    "general-model:7b",
+  ]);
+  engine.agent(
+    { ...engine.store.agents.find((a) => a.id === "pip"), model: "" },
+    "pip",
+  );
+  assert.equal(
+    engine.store.agents.find((a) => a.id === "pip").model,
+    undefined,
+  );
+  assert.throws(
+    () =>
+      engine.agent(
+        {
+          ...engine.store.agents.find((a) => a.id === "pip"),
+          model: "bad model name",
+        },
+        "pip",
+      ),
+    /valid Ollama/,
+  );
 });

@@ -8,6 +8,7 @@ export interface Skill {
   instructions: string;
 }
 export interface TeamAgent {
+  model?: string;
   id: string;
   name: string;
   role: string;
@@ -341,6 +342,7 @@ export class MomoEngine {
       name: clean(v?.name, 32),
       role: existing?.id === "momo" ? "Team coordinator" : clean(v?.role, 80),
       instructions: clean(v?.instructions, 6000),
+      model: clean(v?.model, 100) || undefined,
       skills: Array.isArray(v?.skills)
         ? [...new Set(v.skills)].filter((s) =>
             this.store.skills.some((k) => k.id === s),
@@ -349,6 +351,10 @@ export class MomoEngine {
       webSearch: existing?.id === "momo" ? false : v?.webSearch === true,
       color: /^#[a-f\d]{6}$/i.test(v?.color) ? v.color : "#a4b6ef",
     };
+    if (agent.model && !/^[a-zA-Z0-9._:/-]{1,100}$/.test(agent.model))
+      throw new Error(
+        "Enter a valid Ollama model tag, or leave it empty to use the office model.",
+      );
     if (!agent.name || !agent.role)
       throw new Error("Name and role are required.");
     if (
@@ -494,13 +500,17 @@ export class MomoEngine {
     messages: { role: string; content: string }[],
     signal: AbortSignal,
     json = false,
+    agent?: TeamAgent,
   ) {
     for (let attempt = 0; attempt < 2; attempt++) {
       signal.throwIfAborted();
       try {
         const result = await this.complete(
           messages,
-          { ...this.store.settings },
+          {
+            ...this.store.settings,
+            model: agent?.model || this.store.settings.model,
+          },
           signal,
           json,
         );
@@ -595,6 +605,7 @@ export class MomoEngine {
         ],
         signal,
         true,
+        manager,
       ),
     );
     if (
@@ -645,7 +656,7 @@ export class MomoEngine {
           content: `Original request:\n${run.context || ""}\n${run.prompt}\nYour assignment:\n${step.title}\nEarlier teammates’ work:\n${previous || "(none)"}`,
         },
       ];
-      let output = await this.ask(messages, signal);
+      let output = await this.ask(messages, signal, false, agent);
       if (agent.webSearch) {
         let query = "";
         try {
@@ -678,6 +689,8 @@ export class MomoEngine {
               },
             ],
             signal,
+            false,
+            agent,
           );
         }
       }
@@ -716,6 +729,7 @@ export class MomoEngine {
           ],
           signal,
           true,
+          reviewer,
         ),
       );
       if (typeof check.approved !== "boolean")
@@ -757,6 +771,8 @@ export class MomoEngine {
             },
           ],
           signal,
+          false,
+          specialist,
         )
       ).slice(0, 24000);
       step.status = "completed";
@@ -781,6 +797,8 @@ export class MomoEngine {
         },
       ],
       signal,
+      false,
+      manager,
     );
     signal.throwIfAborted();
     // Save only under an app-controlled name, never a model-selected path.

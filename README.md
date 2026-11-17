@@ -6,7 +6,7 @@ The main screen is intentionally quiet: the office and one prompt box. Teammates
 
 ## Windows app
 
-Download **Momo-Office-0.1.0-Windows.exe** from this repository's Releases page and open it. This is a portable app, so no Node.js, terminal windows or application installation is needed. It extracts its runtime temporarily while running.
+Download **Momo-Office-0.2.0-Windows.exe** from this repository's Releases page and open it. This is a portable app, so no Node.js, terminal windows or application installation is needed. It extracts its runtime temporarily while running.
 
 Ollama is a separate prerequisite and is reused if already installed:
 
@@ -29,7 +29,7 @@ Your existing AgentOffice folder is not needed to run this app. Keep it as a bac
 - **Atlas** — data analysis and assumptions.
 - **Echo** — testing proposals and independent quality review.
 
-Add, rename, edit or remove specialists under **Settings → Teammates**. Up to ten teammates can share the office. Momo stays as the coordinator. One AI call runs at a time, including across multiple queued requests, to avoid loading a separate model for each agent. Up to five requests may be queued.
+Add, rename, edit or remove specialists under **Settings → Teammates**. Up to ten teammates can share the office. Momo stays as the coordinator. Each agent can select its own installed Ollama model or share the office default. One AI call runs at a time, including across multiple queued requests. Models are local and may be loaded/unloaded by Ollama as the queue switches between them; larger models use more RAM and can respond more slowly. Up to five requests may be queued.
 
 Skills are reusable instructions, methods and output standards. Create a skill in **Skill library**, then attach it to a teammate. Skills do not install programs, execute code or grant filesystem access. Web lookup is a separate per-agent permission. Team, skill and model edits wait until queued work finishes or is cancelled, so an assignment cannot change midway through a run.
 
@@ -61,7 +61,7 @@ Code output is a proposal for review: agents do not execute generated code, cont
 
 ## Performance
 
-The default is `llama3.2:latest` (the local 3B model). It is a practical starting point for a Ryzen 5 5600G and 32 GB RAM. AMD RX 6600 acceleration depends on Ollama's current supported backends; CPU inference can take longer. Settings accepts any installed Ollama model by its exact name. A model request times out after four minutes, with the failure visible in the request history.
+The default is `llama3.2:latest` (the local 3B model). It is a practical starting point for a Ryzen 5 5600G and 32 GB RAM. AMD RX 6600 acceleration depends on Ollama's current supported backends; CPU inference can take longer. Settings accepts any installed Ollama model by its exact name. Under Teammates, leave the model field empty for the office default or choose a different model for that agent. Starting points include `qwen2.5-coder:7b` for code, `qwen2.5:7b` for general reasoning/review, and `gemma3:4b` for writing. These are candidates to evaluate on your own tasks, not measured winners. Pull only the models you want using `ollama pull MODEL_NAME`. No paid cloud APIs or paid fallbacks are included. A model request times out after four minutes, with the failure visible in the request history.
 
 ## Development
 

@@ -3,6 +3,7 @@ import "./momo.css";
 
 type Skill = { id: string; name: string; instructions: string };
 type Agent = {
+  model?: string;
   id: string;
   name: string;
   role: string;
@@ -608,6 +609,7 @@ function Settings({
                     </span>
                     <strong>{a.name}</strong>
                     <span>{a.role}</span>
+                    <small>{a.model || "Office default model"}</small>
                     <small>
                       {a.skills
                         .map(
@@ -620,8 +622,8 @@ function Settings({
               </div>
               <p className="muted">
                 Momo receives your prompts and delegates to specialists. Add up
-                to ten teammates. More agents share the same model; they don’t
-                each load a separate copy.
+                to ten teammates. Each can use its own installed Ollama model,
+                or share the office default. Requests still run one at a time.
               </p>
             </>
           )}
@@ -673,6 +675,37 @@ function Settings({
                   />
                 </label>
               </div>
+              <label>
+                Ollama model (optional)
+                <input
+                  list="agent-models"
+                  value={agent.model || ""}
+                  maxLength={100}
+                  placeholder={`Office default: ${state.settings.model}`}
+                  onChange={(e) =>
+                    setAgent({ ...agent, model: e.target.value })
+                  }
+                />
+                <datalist id="agent-models">
+                  {connection?.models.map((m) => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
+              </label>
+              <p className="muted">
+                Leave this empty to share the office model. Pick an installed
+                model to specialize this agent.{" "}
+                {agent.model &&
+                  !connection?.models.some(
+                    (m) => m === agent.model || m === agent.model + ":latest",
+                  ) && (
+                    <>
+                      Not installed yet? Run{" "}
+                      <code>ollama pull {agent.model}</code> in PowerShell, then
+                      check the connection again.
+                    </>
+                  )}
+              </p>
               <label>
                 Instructions
                 <textarea
@@ -876,6 +909,30 @@ function Settings({
                 Start with llama3.2:latest on your PC. For a missing model, run{" "}
                 <code>ollama pull {model || "llama3.2"}</code> in PowerShell.
               </p>
+              <div className="status-card">
+                <strong>Free local model starting points</strong>
+                <p>
+                  Use the model selectors under Teammates. These are suggestions
+                  to try, not a guarantee of best performance.
+                </p>
+                <p>
+                  <code>qwen2.5-coder:7b</code> — coding proposals for Pip.
+                  <br />
+                  <code>qwen2.5:7b</code> — general reasoning and review for
+                  Momo, Atlas or Echo.
+                  <br />
+                  <code>gemma3:4b</code> — writing and general-purpose drafts.
+                  <br />
+                  <code>llama3.2:latest</code> — the smaller model already on
+                  your PC.
+                </p>
+                <p>
+                  Download only the models you want with{" "}
+                  <code>ollama pull MODEL_NAME</code>. Larger models take more
+                  memory and can respond more slowly. There are no cloud AI providers or
+                  paid-provider fallbacks.
+                </p>
+              </div>
               <label>
                 Local Ollama address
                 <input
