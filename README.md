@@ -85,7 +85,7 @@ npm run dist:win
 
 Build the Windows application on Windows for native executable resource editing. The first build downloads Electron and packaging tools. `output/` contains the release file. Nothing under `node_modules`, `dist`, `output`, test results or local user data belongs in Git.
 
-The release was cross-compiled for Windows x64. Engine and browser integration tests use mock AI responses. Native desktop startup and shutdown were checked on Linux with a display server. Actual Windows, AMD GPU inference, model quality and live search availability must still be verified on the target PC; the repository's Windows CI also runs desktop checks when available.
+Release executables are built on Windows CI. Engine and browser integration tests use mock AI responses. The pipeline checks desktop startup/shutdown both before and after packaging; local verification also uses Linux with a display server. Actual AMD GPU inference, model quality and live search availability still need verification on your PC.
 
 ## Credits and license
 

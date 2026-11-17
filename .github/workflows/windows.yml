@@ -32,7 +32,8 @@ jobs:
       - name: Test packaged desktop app
         run: node tests/desktop.cjs
         env:
-          MOMO_APP_PATH: ${{ github.workspace }}\output\win-unpacked\resources\app.asar
+          ELECTRON_EXECUTABLE: ${{ github.workspace }}\output\win-unpacked\Momo Office.exe
+          MOMO_PACKAGED: "1"
       - uses: actions/upload-artifact@v4
         with:
           name: Momo-Office-Windows

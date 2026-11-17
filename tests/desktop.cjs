@@ -11,13 +11,17 @@ const assert = require("node:assert/strict");
       process.platform === "linux" ? ["--no-sandbox", "--disable-gpu"] : [];
     app = await electron.launch({
       executablePath: process.env.ELECTRON_EXECUTABLE || undefined,
-      args: [
-        ...extra,
-        process.env.MOMO_APP_PATH || path.resolve(__dirname, ".."),
-      ],
+      args:
+        process.env.MOMO_PACKAGED === "1"
+          ? extra
+          : [
+              ...extra,
+              process.env.MOMO_APP_PATH || path.resolve(__dirname, ".."),
+            ],
       env: { ...process.env, MOMO_USER_DATA_DIR: temporary },
       timeout: 30000,
     });
+    console.log("Desktop process started");
     const window = await app.firstWindow({ timeout: 10000 });
     await window.getByRole("textbox", { name: "Ask Momo" }).waitFor();
     assert.equal(await window.title(), "Momo Office");
@@ -29,11 +33,22 @@ const assert = require("node:assert/strict");
       await window.evaluate(() => typeof window.momoDesktop.openDataFolder),
       "function",
     );
+    console.log("Desktop UI and preload are ready");
     const url = window.url();
     assert.ok(url.startsWith("http://127.0.0.1:"));
     const state = await (await fetch(url + "api/momo/state")).json();
     assert.equal(state.agents.length, 8);
-    await app.close();
+    console.log("Stopping the desktop app");
+    await Promise.race([
+      app.close(),
+      new Promise((_, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("Desktop shutdown timed out.")),
+          15000,
+        );
+        timer.unref();
+      }),
+    ]);
     app = null;
     assert.ok(fs.existsSync(path.join(temporary, "office/momo-office.json")));
     await new Promise((r) => setTimeout(r, 500));
