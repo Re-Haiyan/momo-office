@@ -11,7 +11,10 @@ const assert = require("node:assert/strict");
       process.platform === "linux" ? ["--no-sandbox", "--disable-gpu"] : [];
     app = await electron.launch({
       executablePath: process.env.ELECTRON_EXECUTABLE || undefined,
-      args: [...extra, path.resolve(__dirname, "..")],
+      args: [
+        ...extra,
+        process.env.MOMO_APP_PATH || path.resolve(__dirname, ".."),
+      ],
       env: { ...process.env, MOMO_USER_DATA_DIR: temporary },
       timeout: 30000,
     });

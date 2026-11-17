@@ -32,5 +32,11 @@
     "type": "git",
     "url": "https://github.com/Re-Haiyan/momo-office.git"
   },
-  "homepage": "https://github.com/Re-Haiyan/momo-office"
+  "homepage": "https://github.com/Re-Haiyan/momo-office",
+  "dependencies": {
+    "@colyseus/schema": "^2.0.22",
+    "express": "^4.19.2",
+    "@colyseus/core": "^0.15.57",
+    "@colyseus/ws-transport": "^0.15.3"
+  }
 }

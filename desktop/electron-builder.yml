@@ -7,8 +7,9 @@ buildDependenciesFromSource: false
 directories:
   output: output
 files:
-  - desktop/**
-  - packages/server/dist/**
+  - desktop/main.cjs
+  - desktop/preload.cjs
+  - packages/server/dist/**/*.js
   - packages/ui/dist/**
   - LICENSE
   - package.json
