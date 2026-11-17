@@ -537,6 +537,7 @@ function Settings({
   const [model, setModel] = useState(state.settings.model);
   const [url, setUrl] = useState(state.settings.ollamaUrl);
   const [error, setError] = useState("");
+  const [update, setUpdate] = useState<any>();
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -974,6 +975,39 @@ function Settings({
                 Save skill
               </button>
             </form>
+          )}
+          {tab === "model" && (
+            <section className="update-check">
+              <button
+                type="button"
+                onClick={async () => {
+                  setUpdate({ loading: true });
+                  try {
+                    setUpdate(await api("/updates"));
+                  } catch {
+                    setUpdate({ error: "Update check unavailable." });
+                  }
+                }}
+              >
+                Check for updates
+              </button>
+              {update?.loading && (
+                <p role="status">Checking GitHub Releases…</p>
+              )}
+              {update && !update.loading && (
+                <p role="status">
+                  {update.error ||
+                    (update.available
+                      ? `Version ${update.latest} is available.`
+                      : `You’re using ${update.current}; no newer stable release was found.`)}{" "}
+                  {update.url && (
+                    <a href={update.url} target="_blank" rel="noreferrer">
+                      View release ↗
+                    </a>
+                  )}
+                </p>
+              )}
+            </section>
           )}
           {tab === "model" && (
             <form

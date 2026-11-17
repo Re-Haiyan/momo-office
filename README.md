@@ -6,7 +6,7 @@ The main screen is intentionally quiet: the office and one prompt box. Teammates
 
 ## Windows app
 
-Download **Momo-Office-0.4.0-Setup.exe** from this repository's Releases page. Close any older Momo Office window, run Setup and choose your installation folder. The default is `%LOCALAPPDATA%\Programs\Momo Office`. Setup creates Desktop and Start menu shortcuts, an `Uninstall Momo Office.exe` file inside the application folder, and a Windows Installed apps entry. The app bundles its own runtime; no Node.js or build commands are needed.
+Download **Momo-Office-0.5.0-Setup.exe** from this repository's Releases page. Close any older Momo Office window, run Setup and choose your installation folder. The default is `%LOCALAPPDATA%\Programs\Momo Office`. Setup creates Desktop and Start menu shortcuts, an `Uninstall Momo Office.exe` file inside the application folder, and a Windows Installed apps entry. The app bundles its own runtime; no Node.js or build commands are needed.
 
 Ollama is a separate prerequisite and is reused if already installed:
 
@@ -89,7 +89,7 @@ Request meters count this installation’s inference attempts (including failure
 
 In plain-server mode, keys are accepted **only** through `GEMINI_API_KEY`, `GROQ_API_KEY`, and `OPENROUTER_API_KEY` environment variables, set before starting the server. The browser key field is disabled; there is no HTTP key-write endpoint. Desktop ignores these environment keys and uses encrypted storage. Do not put keys in JSON settings, prompts, screenshots or committed files. Known keys are redacted from saved state, exports and errors, and never returned by `GET /state` or provider metadata. This redaction is a guard against accidental reflection, not a general secret scanner.
 
-Protocol endpoints, auth, JSON/streaming notes, source links, free-model eligibility, documented quotas and **last verified date (2026-11-17)** are editable in [`providers.config.ts`](packages/server/src/momo/providers/providers.config.ts). Model catalogs supply live context limits; Gemini/Groq entries are intersected with the documented free-tier allowlist. Retired models are omitted rather than silently replaced. OpenRouter requires an explicit `:free` ID and zero advertised prices, caps prompt/completion/request routing prices at zero, and disables upstream provider fallbacks. The office currently uses non-streaming completions; streaming protocols are documented in the config for a future UI. All provider behavior tests use mocks; no real key or cloud quota is consumed by CI.
+Protocol endpoints, auth, JSON/streaming notes, source links, free-model eligibility, documented quotas and **last verified date (2026-11-17)** are editable in [`providers.config.ts`](packages/server/src/momo/providers/providers.config.ts). Model catalogs supply live context limits; Gemini/Groq entries are intersected with the documented free-tier allowlist. Retired models are omitted rather than silently replaced. OpenRouter requires an explicit `:free` ID and zero advertised prices, caps prompt/completion/request routing prices at zero, and disables upstream provider fallbacks. Cloud providers currently use non-streaming completions; streaming protocols are documented in the config for a future UI. All provider behavior tests use mocks; no real key or cloud quota is consumed by CI.
 
 ## Performance
 
@@ -146,3 +146,21 @@ Ollama streams partial specialist text, with throttled persistence and cancellat
 Every API request, including GET and office live connections, checks the exact loopback Host and any supplied Origin. Non-health endpoints require a per-launch session token. Electron generates it and passes it privately to its server and preload; browser mode bootstraps it in same-origin HTML and an HttpOnly, SameSite=Strict session cookie. Tokens are not stored in office data. State changes without Origin require a valid token. Vite’s development Origin is allowed only with `NODE_ENV=development`; production does not allow it. External websites cannot read the token or frame the app.
 
 Helmet applies a strict script CSP (same-origin scripts, no inline scripts/eval), blocks objects/frames, and limits connections to the app/loopback live transport. Inline style attributes are allowed for React/Phaser positioning, not scripts. Opening a saved page directly or calling the API without the current session token is unsupported. Health is read-only and still requires a loopback Host.
+
+
+## Architecture and release verification — phase 5
+
+`MomoEngine` keeps its public API as a small facade over focused modules: `store.ts` (versioned data and settings), `queue.ts` (serial workflow), `ollama.ts` (budgeted inference), `search.ts`, `planner.ts`, `reviewer.ts`, and `prompts.ts`. The store format stays at version 3. Saves debounce for about 250 ms through one asynchronous atomic writer; terminal results and shutdown flush pending writes. An abrupt power loss can lose the last fraction of a second of intermediate progress, not overwrite an existing file with partial JSON.
+
+The office simulation is a plain module delivered over authenticated SSE, with the same desks, door-aware routing, meetings and breaks. Colyseus and its schema/client dependencies are removed. Workspace names are now `@momo-office/server` and `@momo-office/ui`.
+
+**Settings → AI & app → Check for updates** makes a bounded, optional metadata request to the public GitHub Releases API. It compares stable versions and shows a release link; it never downloads or installs anything. This request contains no prompts. Startup and local inference do not wait for it.
+
+Every Windows build publishes `SHA256SUMS.txt` and an installer `.sha256` file with the release. Before running an unsigned installer, download its checksum from the same trusted repository release and compare in PowerShell:
+
+```powershell
+Get-FileHash .\Momo-Office-0.5.0-Setup.exe -Algorithm SHA256
+Get-Content .\Momo-Office-0.5.0-Setup.exe.sha256
+```
+
+The hash must match exactly. A matching hash verifies download integrity against that release, not publisher identity or the safety of generated AI output. Windows may still show an unknown-publisher warning because the build is unsigned.

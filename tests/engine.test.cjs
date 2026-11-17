@@ -790,3 +790,86 @@ test("router and upgrade security reject bad Host/Origin, missing tokens and una
     checkRequest(req({ "x-momo-token": "é".repeat(token.length) }), token),
   );
 });
+
+test("all desks and seats are mutually reachable and every target is walkable", () => {
+  const {
+    officeLayout,
+    findOfficePath,
+    walkable,
+  } = require("../packages/server/dist/momo/OfficeLayout");
+  const nodes = [
+    ...officeLayout.desks,
+    ...officeLayout.meetingSeats,
+    ...officeLayout.coffeeSeats,
+    ...officeLayout.loungeSeats,
+    ...officeLayout.readingSeats,
+  ];
+  for (const node of nodes) assert.ok(walkable(node));
+  for (const from of nodes)
+    for (const to of nodes) {
+      if (from.x === to.x && from.y === to.y) continue;
+      const route = findOfficePath(from, to);
+      assert.ok(route.length);
+      assert.deepEqual(route.at(-1), to);
+      assert.ok(route.every(walkable));
+    }
+});
+test("single asynchronous writer debounces compact snapshots and flushes on shutdown", async (t) => {
+  const { StoreWriter } = require("../packages/server/dist/momo/store");
+  const fs = require("node:fs");
+  const dir = mkdtempSync(path.join(tmpdir(), "momo-writer-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "store.json");
+  let current = 0,
+    serialized = 0;
+  const writer = new StoreWriter(
+    file,
+    () => {
+      serialized++;
+      return JSON.stringify({ current });
+    },
+    () => assert.fail("write failed"),
+  );
+  for (let i = 1; i <= 50; i++) {
+    current = i;
+    writer.schedule();
+  }
+  await writer.flush();
+  assert.equal(serialized, 1);
+  assert.equal(readFileSync(file, "utf8"), '{"current":50}');
+  current = 51;
+  writer.schedule();
+  await Promise.all([writer.flush(), writer.flush()]);
+  assert.equal(JSON.parse(readFileSync(file, "utf8")).current, 51);
+  assert.ok(!fs.existsSync(file + ".tmp"));
+});
+test("interrupted work is marked failed and resumes completed work after restart", async (t) => {
+  const fs = require("node:fs");
+  const e = fixture(t, async (_m, _s, _signal, json) =>
+    json
+      ? JSON.stringify({ tasks: [{ agentId: "pip", title: "One" }] })
+      : "work",
+  );
+  e.submit("Work");
+  await settled(e);
+  await e.shutdown();
+  const saved = e.snapshot();
+  saved.runs[0].status = "working";
+  saved.runs[0].steps[0].status = "working";
+  fs.writeFileSync(
+    path.join(e.directory, "momo-office.json"),
+    JSON.stringify(saved),
+  );
+  const restored = new MomoEngine(e.directory, async () => "");
+  assert.equal(restored.snapshot().runs[0].status, "failed");
+  assert.equal(restored.snapshot().runs[0].resumable, true);
+  assert.equal(restored.snapshot().runs[0].steps[0].status, "failed");
+  await restored.shutdown();
+});
+test("update comparison only offers newer stable versions", () => {
+  const { isNewerVersion } = require("../packages/server/dist/momo/updates");
+  assert.equal(isNewerVersion("0.5.0", "v0.5.1"), true);
+  assert.equal(isNewerVersion("0.5.0", "v0.4.9"), false);
+  assert.equal(isNewerVersion("0.5.0", "v0.5.0"), false);
+  assert.equal(isNewerVersion("0.5.0", "v0.6.0-beta"), false);
+});

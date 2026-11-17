@@ -1,41 +1,60 @@
-import { Room } from "@colyseus/core";
-import { OfficeState } from "../schema/OfficeState";
-import { momo } from "../momo/instance";
-import { terminal } from "../momo/Engine";
-import { officeLayout, findOfficePath, Point } from "../momo/OfficeLayout";
-
-/** The room visualizes actual queue phases; it never makes its own model calls. */
-export class OfficeRoom extends Room<OfficeState> {
-  maxClients = 10;
+import { terminal, Store } from "./store";
+import { officeLayout, findOfficePath, Point } from "./OfficeLayout";
+export type OfficeAgent = {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  direction: string;
+  action: string;
+  currentTask: string;
+  thought: string;
+};
+export class OfficeSimulation {
+  private agents = new Map<string, OfficeAgent>();
   private routes = new Map<string, { target: string; steps: Point[] }>();
-  onCreate() {
-    this.setState(new OfficeState());
-    this.updateOffice();
-    this.setSimulationInterval(() => this.updateOffice(), 180);
-  }
-  private updateOffice() {
-    const team = momo.store.agents;
+  constructor(
+    private engine: {
+      store: Store;
+      activity: (id: string) => {
+        action: string;
+        task: string;
+        thought: string;
+      };
+    },
+  ) {}
+  snapshot() {
+    const team = this.engine.store.agents;
     const ids = new Set(team.map((a) => a.id));
-    for (const id of this.state.agents.keys())
+    for (const id of this.agents.keys())
       if (!ids.has(id)) {
-        this.state.removeAgent(id);
+        this.agents.delete(id);
         this.routes.delete(id);
       }
-    const run = momo.store.runs.find(
+    const run = this.engine.store.runs.find(
       (r) => !terminal(r) && r.status !== "queued",
     );
     const meeting = run && ["planning", "reviewing"].includes(run.status);
-    this.state.officeTime = new Date().toISOString();
+
     team.forEach((agent, index) => {
       const desk = officeLayout.desks[index];
-      let state = this.state.agents.get(agent.id);
+      let state = this.agents.get(agent.id);
       if (!state) {
-        this.state.createAgent(agent.id, agent.name);
-        state = this.state.agents.get(agent.id)!;
+        state = {
+          id: agent.id,
+          name: agent.name,
+          x: desk.x,
+          y: desk.y,
+          direction: "down",
+          action: "idle",
+          currentTask: "",
+          thought: "",
+        };
+        this.agents.set(agent.id, state);
         state.x = desk.x;
         state.y = desk.y;
       }
-      const activity = momo.activity(agent.id);
+      const activity = this.engine.activity(agent.id);
       let target = desk,
         action = activity.action,
         thought = activity.thought;
@@ -89,5 +108,9 @@ export class OfficeRoom extends Room<OfficeState> {
       state.currentTask = activity.task;
       state.thought = thought;
     });
+    return {
+      agents: [...this.agents.values()].map((a) => ({ ...a })),
+      officeTime: new Date().toISOString(),
+    };
   }
 }

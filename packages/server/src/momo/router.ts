@@ -1,3 +1,4 @@
+import { checkForUpdates } from "./updates";
 import { Router } from "express";
 import { momo } from "./instance";
 import { cloudIds } from "./providers/secrets";
@@ -155,4 +156,9 @@ momoRouter.post(
 momoRouter.post(
   "/runs/:id/resume",
   action((req) => momo.resume(req.params.id)),
+);
+
+momoRouter.get(
+  "/updates",
+  action(() => checkForUpdates()),
 );

@@ -1,3 +1,5 @@
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { lookup } from "node:dns/promises";
 export type SearchSettings = {
   provider: "duckduckgo" | "searxng" | "brave" | "tavily";
@@ -61,16 +63,51 @@ async function pageText(address: string, signal: AbortSignal) {
     const addresses = await lookup(url.hostname, { all: true });
     if (!addresses.length || addresses.some((a) => privateAddress(a.address)))
       throw new Error("Private search URL blocked.");
-    const r = await fetch(url, {
-      redirect: "manual",
-      signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
+    // Pin the checked address for this connection, preventing DNS rebinding between check and fetch.
+    const r = await new Promise<{
+      status: number;
+      location?: string;
+      text: string;
+    }>((resolve, reject) => {
+      const request = (url.protocol === "https:" ? httpsRequest : httpRequest)(
+        url,
+        {
+          signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
+          family: addresses[0].family,
+          lookup: (_hostname, _options, callback: any) =>
+            callback(null, addresses[0].address, addresses[0].family),
+        },
+        (response) => {
+          const chunks: Buffer[] = [];
+          let size = 0;
+          response.on("data", (chunk: Buffer) => {
+            size += chunk.length;
+            if (size > 256000) {
+              request.destroy(new Error("Page exceeded size limit."));
+              return;
+            }
+            chunks.push(chunk);
+          });
+          response.on("error", reject);
+          response.on("end", () =>
+            resolve({
+              status: response.statusCode || 0,
+              location: response.headers.location,
+              text: Buffer.concat(chunks).toString("utf8"),
+            }),
+          );
+        },
+      );
+      request.on("error", reject);
+      request.end();
     });
     if (r.status >= 300 && r.status < 400) {
-      await r.body?.cancel();
-      url = new URL(r.headers.get("location") || "", url);
+      url = new URL(r.location || "", url);
       continue;
     }
-    const html = await limited(r);
+    if (r.status < 200 || r.status >= 300)
+      throw new Error("Search page unavailable.");
+    const html = r.text;
     return {
       url: url.href,
       text: html

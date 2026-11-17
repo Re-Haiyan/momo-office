@@ -4,10 +4,8 @@ import { randomUUID } from "crypto";
 import { checkRequest } from "./momo/security";
 import express from "express";
 import path from "path";
-import { Server } from "@colyseus/core";
-import { WebSocketTransport } from "@colyseus/ws-transport";
 import { createServer } from "http";
-import { OfficeRoom } from "./rooms/OfficeRoom";
+import { OfficeSimulation } from "./momo/office";
 import { momoRouter } from "./momo/router";
 import { momo, initializeMomo } from "./momo/instance";
 
@@ -88,20 +86,49 @@ app.use(
   },
 );
 const httpServer = createServer(app);
-const server = new Server({
-  greet: false,
-  transport: new WebSocketTransport({
-    server: httpServer,
-    verifyClient: (info, done) => {
-      const code = checkRequest(info.req, apiToken, true, dev);
-      done(
-        !code,
-        code || undefined,
-        code ? "Office session rejected." : undefined,
-      );
-    },
-  }),
+let office: OfficeSimulation;
+const clients = new Set<express.Response>();
+app.get("/api/office/events", (req, res) => {
+  if (clients.size >= 10) {
+    res.sendStatus(429);
+    return;
+  }
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+  clients.add(res);
+  res.write(`event: office\ndata: ${JSON.stringify(office.snapshot())}\n\n`);
+  req.on("close", () => clients.delete(res));
 });
+const tick = setInterval(() => {
+  if (!office || !clients.size) return;
+  const frame = `event: office\ndata: ${JSON.stringify(office.snapshot())}\n\n`;
+  for (const res of clients) {
+    if (res.writableLength > 262144) {
+      res.end();
+      clients.delete(res);
+    } else res.write(frame);
+  }
+}, 180);
+tick.unref();
+httpServer.on("upgrade", (req, socket) => {
+  const code = checkRequest(req, apiToken, true, dev) || 400;
+  socket.end(`HTTP/1.1 ${code} Rejected\r\nConnection: close\r\n\r\n`);
+});
+let closing = false;
+async function shutdown() {
+  if (closing) return;
+  closing = true;
+  clearInterval(tick);
+  for (const res of clients) res.end();
+  clients.clear();
+  await momo.shutdown();
+  await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+  process.exit(0);
+}
+process.once("SIGTERM", () => void shutdown());
+process.once("SIGINT", () => void shutdown());
 app.post("/api/shutdown", (req, res) => {
   if (
     !process.env.OFFICE_SHUTDOWN_TOKEN ||
@@ -111,12 +138,16 @@ app.post("/api/shutdown", (req, res) => {
     return;
   }
   res.json({ ok: true });
-  setTimeout(() => void server.gracefullyShutdown(), 100);
+  setTimeout(() => void shutdown(), 100);
 });
-server.define("office", OfficeRoom);
-server.onShutdown(() => momo.shutdown());
 initializeMomo()
-  .then(() => server.listen(Number(process.env.PORT || 3000), "127.0.0.1"))
+  .then(() => {
+    office = new OfficeSimulation(momo);
+    return new Promise<void>((resolve, reject) => {
+      httpServer.once("error", reject);
+      httpServer.listen(Number(process.env.PORT || 3000), "127.0.0.1", resolve);
+    });
+  })
   .then(() => {
     const port = (httpServer.address() as any).port;
     if (process.send) process.send({ type: "ready", port });

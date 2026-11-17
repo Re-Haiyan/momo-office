@@ -1,6 +1,6 @@
 {
   "name": "momo-office",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "A cozy local AI office with a coordinator and specialist teammates.",
   "author": "Momo Office contributors",
@@ -10,11 +10,11 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @agent-office/server && npm run build -w @agent-office/ui",
+    "build": "npm run build -w @momo-office/server && npm run build -w @momo-office/ui",
     "start": "node packages/server/dist/index.js",
     "desktop": "electron .",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --config desktop/electron-builder.yml --publish never",
-    "test": "npm run build -w @agent-office/server && node --test tests/*.test.cjs",
+    "test": "npm run build -w @momo-office/server && node --test tests/*.test.cjs",
     "test:ui": "node tests/browser.cjs"
   },
   "devDependencies": {
@@ -34,9 +34,6 @@
   },
   "homepage": "https://github.com/Re-Haiyan/momo-office",
   "dependencies": {
-    "@colyseus/core": "^0.15.57",
-    "@colyseus/schema": "^2.0.22",
-    "@colyseus/ws-transport": "^0.15.3",
     "express": "^4.19.2",
     "helmet": "^8.3.0"
   }

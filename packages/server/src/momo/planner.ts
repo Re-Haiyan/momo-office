@@ -1,3 +1,6 @@
+import type { RunQueue } from "./queue";
+import type { TeamAgent } from "./store";
+import { parseJson } from "./prompts";
 export const planSchema = (ids: string[]) => ({
   type: "object",
   properties: {
@@ -61,4 +64,40 @@ export function summarizeOutput(text: string, limit = 3000) {
       );
     })
     .join("");
+}
+
+export async function structured(
+  this: RunQueue,
+  messages: { role: string; content: string }[],
+  signal: AbortSignal,
+  schema: object,
+  agent: TeamAgent,
+  validate: (value: any) => any,
+) {
+  let feedback = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const output = await this.ask(
+      [
+        ...messages,
+        ...(feedback
+          ? [
+              {
+                role: "user",
+                content: `Your previous JSON failed validation: ${feedback}. Return corrected JSON only, following the schema.`,
+              },
+            ]
+          : []),
+      ],
+      signal,
+      schema,
+      agent,
+    );
+    try {
+      return validate(parseJson(output));
+    } catch (e: any) {
+      signal.throwIfAborted();
+      if (attempt) throw e;
+      feedback = e.message;
+    }
+  }
 }

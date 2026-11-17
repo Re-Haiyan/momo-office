@@ -1,10 +1,19 @@
 import { sessionHeaders } from "../session";
 import Phaser from "phaser";
-import * as Colyseus from "colyseus.js";
-import { OfficeState, AgentState } from "./schema";
+type AgentState = {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  direction: string;
+  action: string;
+  thought: string;
+  currentTask: string;
+};
 
 class OfficeScene extends Phaser.Scene {
-  private room?: Colyseus.Room<OfficeState>;
+  private stream?: EventSource;
+  private agentUpdates = new Map<string, (agent: AgentState) => void>();
   private sprites = new Map<string, Phaser.GameObjects.Container>();
   private dragging = false;
   private moved = false;
@@ -99,39 +108,35 @@ class OfficeScene extends Phaser.Scene {
     );
     this.events.once("shutdown", () => {
       this.closing = true;
-      void this.room?.leave();
+      this.stream?.close();
     });
     void this.connect();
   }
   private async connect() {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const port =
-      window.location.port === "5173" ? "3000" : window.location.port;
-    try {
-      this.room = await new Colyseus.Client(
-        `${protocol}//${window.location.hostname}:${port}`,
-        { headers: sessionHeaders() },
-      ).joinOrCreate<OfficeState>("office");
-      this.room.onStateChange.once((state) => {
-        state.agents.onAdd((agent: AgentState, id: string) =>
-          this.addAgent(agent, id),
-        );
-        state.agents.onRemove((_agent: AgentState, id: string) => {
-          this.sprites.get(id)?.destroy();
-          this.sprites.delete(id);
-        });
+    this.stream = new EventSource("/api/office/events");
+    this.stream.addEventListener("office", (event) => {
+      if (this.closing) return;
+      try {
+        const state = JSON.parse((event as MessageEvent).data);
+        const ids = new Set<string>();
+        for (const agent of state.agents as AgentState[]) {
+          ids.add(agent.id);
+          if (!this.sprites.has(agent.id)) this.addAgent(agent, agent.id);
+          this.agentUpdates.get(agent.id)?.(agent);
+        }
+        for (const id of this.sprites.keys())
+          if (!ids.has(id)) {
+            this.sprites.get(id)?.destroy();
+            this.sprites.delete(id);
+            this.agentUpdates.delete(id);
+          }
         window.dispatchEvent(new Event("momo:room-ready"));
-      });
-      this.room.onLeave(() => {
-        for (const sprite of this.sprites.values()) sprite.destroy();
-        this.sprites.clear();
-        if (!this.closing)
-          this.time.delayedCall(3000, () => void this.connect());
-      });
-    } catch (error) {
-      console.warn("Office view reconnecting", error);
-      if (!this.closing) this.time.delayedCall(3000, () => void this.connect());
-    }
+      } catch {
+        console.warn(
+          "Office frame was unavailable. Waiting for the next frame.",
+        );
+      }
+    });
   }
   private addAgent(agent: AgentState, id: string) {
     if (this.sprites.has(id)) return;
@@ -169,7 +174,8 @@ class OfficeScene extends Phaser.Scene {
     this.sprites.set(id, group);
     let previousX = agent.x,
       previousY = agent.y;
-    agent.onChange(() => {
+    this.agentUpdates.set(id, (next) => {
+      agent = next;
       this.tweens.killTweensOf(group);
       this.tweens.add({
         targets: group,
