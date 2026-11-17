@@ -16,6 +16,51 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "momo-browser-"));
 const screenshots =
   process.env.TEST_OUTPUT_DIR || path.join(root, "work/test-results");
 fs.mkdirSync(screenshots, { recursive: true });
+// Capture the actual rendered pixels as a still while the DOM screenshot is taken.
+// This avoids software Windows compositors starving capture during continuous canvas draws.
+async function capture(page, file) {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    const canvas = document.querySelector("canvas");
+    if (!canvas) return;
+    const parent = canvas.parentElement,
+      bounds = canvas.getBoundingClientRect(),
+      host = parent.getBoundingClientRect();
+    const still = document.createElement("img");
+    still.dataset.captureStill = "true";
+    still.alt = "";
+    still.src = canvas.toDataURL("image/png");
+    Object.assign(still.style, {
+      position: "absolute",
+      left: `${bounds.x - host.x}px`,
+      top: `${bounds.y - host.y}px`,
+      width: `${bounds.width}px`,
+      height: `${bounds.height}px`,
+      imageRendering: "pixelated",
+      pointerEvents: "none",
+    });
+    await still.decode();
+    parent.appendChild(still);
+    canvas.dataset.captureVisibility = canvas.style.visibility;
+    canvas.style.visibility = "hidden";
+  });
+  try {
+    await page.screenshot({
+      path: path.join(screenshots, file),
+      animations: "disabled",
+      timeout: 60000,
+    });
+  } finally {
+    await page.evaluate(() => {
+      const canvas = document.querySelector("canvas");
+      if (canvas) {
+        canvas.style.visibility = canvas.dataset.captureVisibility || "";
+        delete canvas.dataset.captureVisibility;
+      }
+      document.querySelector("[data-capture-still]")?.remove();
+    });
+  }
+}
 let child,
   browser,
   origin,
@@ -220,7 +265,7 @@ const mock = http.createServer(async (req, res) => {
   assert.equal(await canvas.getAttribute("data-zoom"), "2");
   await canvas.focus();
   await page.keyboard.press("0");
-  await page.screenshot({ path: path.join(screenshots, "Momo-Office.png") });
+  await capture(page, "Momo-Office.png");
   await page.getByRole("button", { name: "Open settings" }).click();
   await page.getByRole("tab", { name: "Skills", exact: true }).click();
   await page.getByRole("button", { name: "+ Add skill", exact: true }).click();
@@ -297,7 +342,7 @@ const mock = http.createServer(async (req, res) => {
       .isDisabled(),
     true,
   );
-  await page.screenshot({ path: path.join(screenshots, "Providers.png") });
+  await capture(page, "Providers.png");
   await page.getByRole("tab", { name: "Display", exact: true }).focus();
   await page.keyboard.press("ArrowLeft");
   assert.equal(
@@ -440,7 +485,7 @@ const mock = http.createServer(async (req, res) => {
   await page.getByRole("button", { name: "Talk to Sage", exact: true }).click();
   await page.getByRole("button", { name: "View output", exact: true }).click();
   assert.equal(await page.locator(".step[open]").count(), 1);
-  await page.screenshot({ path: path.join(screenshots, "Momo-Answer.png") });
+  await capture(page, "Momo-Answer.png");
   await page.locator(".answer-heading").click();
   for (const [width, height] of [
     [1920, 1080],
@@ -461,9 +506,7 @@ const mock = http.createServer(async (req, res) => {
     assert.ok(
       Number.isInteger(Number(await canvas.getAttribute("data-render-scale"))),
     );
-    await page.screenshot({
-      path: path.join(screenshots, `Pixel-Office-${width}x${height}.png`),
-    });
+    await capture(page, `Pixel-Office-${width}x${height}.png`);
   }
   await page.setViewportSize({ width: 1920, height: 1080 });
   const frameRate = await page.evaluate(
@@ -550,7 +593,7 @@ const mock = http.createServer(async (req, res) => {
     .getByRole("textbox", { name: "Ask Momo" })
     .boundingBox();
   assert.ok(box.x >= 0 && box.x + box.width <= 390);
-  await page.screenshot({ path: path.join(screenshots, "Momo-Mobile.png") });
+  await capture(page, "Momo-Mobile.png");
   const exportResponse = await authedFetch(
     origin + `/api/momo/runs/${state.runs[0].id}/export`,
   );

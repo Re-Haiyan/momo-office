@@ -28,6 +28,7 @@ jobs:
       - run: npx playwright install chromium
       - run: npm run test:ui
       - name: Save visual check screenshots
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Momo-Office-VisualChecks
