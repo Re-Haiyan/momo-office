@@ -28,16 +28,19 @@ jobs:
       - run: npx playwright install chromium
       - run: npm run test:ui
       - run: node tests/desktop.cjs
+      - run: node tests/startup-cancel.cjs
       - run: npm run dist:win
       - name: Test packaged desktop app
         run: node tests/desktop.cjs
         env:
           ELECTRON_EXECUTABLE: ${{ github.workspace }}\output\win-unpacked\Momo Office.exe
           MOMO_PACKAGED: "1"
+      - name: Install and uninstall check
+        run: ./tests/installer.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: Momo-Office-Windows
-          path: output/Momo-Office-*-Windows.exe
+          path: output/Momo-Office-*-Setup.exe
   release:
     needs: windows
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
@@ -60,12 +63,12 @@ jobs:
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $tag = "v$version"
           if ($env:GITHUB_REF -like 'refs/tags/*' -and $env:GITHUB_REF_NAME -ne $tag) { throw 'The release tag must match package.json version.' }
-          $exe = Get-Item "output/Momo-Office-$version-Windows.exe"
+          $exe = Get-Item "output/Momo-Office-$version-Setup.exe"
           $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
           "$hash  $($exe.Name)" | Set-Content output/SHA256SUMS.txt -Encoding utf8
           $notesFile = Join-Path $env:RUNNER_TEMP 'momo-release-notes.md'
           $notes = Get-Content .github/release-notes.md -Raw
-          $notes += "`n`nWindows build, browser flows, engine tests, desktop startup/shutdown, and packaged-app launch passed: https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID`n"
+          $notes += "`n`nWindows build, browser flows, engine tests, loading-screen handoff, desktop startup/shutdown, packaged-app launch, installation and uninstallation passed: https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID`n"
           $notes | Set-Content $notesFile -Encoding utf8
           $existing = gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft 2>$null
           if ($LASTEXITCODE -ne 0) {

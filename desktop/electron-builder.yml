@@ -9,17 +9,32 @@ directories:
 files:
   - desktop/main.cjs
   - desktop/preload.cjs
+  - desktop/splash.html
+  - desktop/splash.css
+  - desktop/splash.js
+  - desktop/splash-preload.cjs
   - packages/server/dist/**/*.js
   - packages/ui/dist/**
   - LICENSE
   - package.json
 win:
   target:
-    - target: portable
+    - target: nsis
       arch: [x64]
   icon: desktop/icon.ico
-  signAndEditExecutable: false
-  artifactName: Momo-Office-${version}-Windows.exe
-portable:
-  requestExecutionLevel: user
-  splashImage: false
+  signExecutable: false
+  artifactName: Momo-Office-${version}-Setup.exe
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Momo Office
+  uninstallDisplayName: Momo Office
+  runAfterFinish: false
+  deleteAppDataOnUninstall: false
+  differentialPackage: false
+  installerIcon: desktop/icon.ico
+  uninstallerIcon: desktop/icon.ico

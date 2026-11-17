@@ -6,17 +6,21 @@ The main screen is intentionally quiet: the office and one prompt box. Teammates
 
 ## Windows app
 
-Download **Momo-Office-0.2.0-Windows.exe** from this repository's Releases page and open it. This is a portable app, so no Node.js, terminal windows or application installation is needed. It extracts its runtime temporarily while running.
+Download **Momo-Office-0.3.0-Setup.exe** from this repository's Releases page. Close any older Momo Office window, run Setup and choose your installation folder. The default is `%LOCALAPPDATA%\Programs\Momo Office`. Setup creates Desktop and Start menu shortcuts, an `Uninstall Momo Office.exe` file inside the application folder, and a Windows Installed apps entry. The app bundles its own runtime; no Node.js or build commands are needed.
 
 Ollama is a separate prerequisite and is reused if already installed:
 
 1. Install or open [Ollama for Windows](https://ollama.com/download/windows).
 2. If needed, run `ollama pull llama3.2` once in PowerShell.
-3. Open Momo Office. The status at the top right shows whether Ollama and the selected model are ready.
+3. Open Momo Office from its shortcut. A mascot loading screen shows startup status until both the interface and office room are ready. You can cancel startup. Ollama connection/model status is shown inside the office; an unavailable model does not trap you in the loading screen.
 
 The first release is unsigned. Windows may show an unknown-publisher prompt. Check the repository release and its SHA256 checksum before deciding whether to run it.
 
 Your existing AgentOffice folder is not needed to run this app. Keep it as a backup until you have verified the new app. This app uses its own data directory and does not migrate or delete the old office's database.
+
+## Uninstall
+
+Close Momo Office, then run `Uninstall Momo Office.exe` inside its installation folder, or select Momo Office in **Windows Settings → Apps → Installed apps → Uninstall**. Uninstall removes the application files and shortcuts. Your team settings, prompts and results remain under `%APPDATA%\momo-office\office` for a later reinstall. Ollama and its downloaded models are managed separately.
 
 ## Your team
 
@@ -65,7 +69,7 @@ The default is `llama3.2:latest` (the local 3B model). It is a practical startin
 
 ## Development
 
-Node.js 22.12+ is required to build from source. The downloadable app bundles its runtime.
+Node.js 22.12+ is required to build from source. The installer bundles the app runtime.
 
 ```sh
 npm ci
@@ -83,7 +87,7 @@ node tests/desktop.cjs
 npm run dist:win
 ```
 
-Build the Windows application on Windows for native executable resource editing. The first build downloads Electron and packaging tools. `output/` contains the release file. Nothing under `node_modules`, `dist`, `output`, test results or local user data belongs in Git.
+Build the Windows application on Windows for native executable resource editing. The first build downloads Electron and packaging tools. `output/` contains the Setup executable. Nothing under `node_modules`, `dist`, `output`, test results or local user data belongs in Git.
 
 Release executables are built on Windows CI. Engine and browser integration tests use mock AI responses. The pipeline checks desktop startup/shutdown both before and after packaging; local verification also uses Linux with a display server. Actual AMD GPU inference, model quality and live search availability still need verification on your PC.
 

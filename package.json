@@ -1,6 +1,6 @@
 {
   "name": "momo-office",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "A cozy local AI office with a coordinator and specialist teammates.",
   "author": "Momo Office contributors",
@@ -13,7 +13,7 @@
     "build": "npm run build -w @agent-office/server && npm run build -w @agent-office/ui",
     "start": "node packages/server/dist/index.js",
     "desktop": "electron .",
-    "dist:win": "npm run build && electron-builder --win portable --x64 --config desktop/electron-builder.yml --publish never",
+    "dist:win": "npm run build && electron-builder --win nsis --x64 --config desktop/electron-builder.yml --publish never",
     "test": "npm run build -w @agent-office/server && node --test tests/engine.test.cjs",
     "test:ui": "node tests/browser.cjs"
   },

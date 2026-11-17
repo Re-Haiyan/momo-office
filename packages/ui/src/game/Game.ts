@@ -114,6 +114,7 @@ class OfficeScene extends Phaser.Scene {
           this.sprites.get(id)?.destroy();
           this.sprites.delete(id);
         });
+        window.dispatchEvent(new Event("momo:room-ready"));
       });
       this.room.onLeave(() => {
         for (const sprite of this.sprites.values()) sprite.destroy();

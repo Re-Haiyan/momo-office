@@ -18,12 +18,48 @@ const assert = require("node:assert/strict");
               ...extra,
               process.env.MOMO_APP_PATH || path.resolve(__dirname, ".."),
             ],
-      env: { ...process.env, MOMO_USER_DATA_DIR: temporary },
+      env: {
+        ...process.env,
+        MOMO_USER_DATA_DIR: temporary,
+        MOMO_SPLASH_MIN_MS: "2500",
+      },
       timeout: 30000,
     });
     console.log("Desktop process started");
-    const window = await app.firstWindow({ timeout: 10000 });
+    const splash = await app.firstWindow({ timeout: 10000 });
+    assert.equal(await splash.title(), "Starting Momo Office");
+    await splash
+      .getByRole("progressbar", { name: "Starting Momo Office" })
+      .waitFor();
+    assert.equal(
+      await splash
+        .locator("img")
+        .evaluate((image) => image.complete && image.naturalWidth > 0),
+      true,
+    );
+    let window;
+    for (let i = 0; i < 300 && !window; i++) {
+      for (const candidate of app.windows()) {
+        try {
+          if ((await candidate.title()) === "Momo Office") {
+            window = candidate;
+            break;
+          }
+        } catch {}
+      }
+      if (!window) await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.ok(window, "The office window must open after the splash.");
     await window.getByRole("textbox", { name: "Ask Momo" }).waitFor();
+    for (let i = 0; i < 300 && !splash.isClosed(); i++)
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(
+      splash.isClosed(),
+      true,
+      "The loading screen must close after the office becomes ready.",
+    );
+    const officeWindow = await app.browserWindow(window);
+    assert.equal(await officeWindow.evaluate((win) => win.isVisible()), true);
     assert.equal(await window.title(), "Momo Office");
     assert.equal(
       await window.evaluate(() => typeof window.require),
@@ -60,7 +96,7 @@ const assert = require("node:assert/strict");
     }
     assert.equal(stopped, true);
     console.log(
-      "PASS: desktop launches its own local server and UI, renderer has no Node access, fixed data IPC works, saved data exists, server stops with app.",
+      "PASS: loading screen and mascot appear, ready office replaces splash, renderer has no Node access, saved data exists, server stops with app.",
     );
   } catch (error) {
     try {

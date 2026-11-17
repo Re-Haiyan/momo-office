@@ -105,6 +105,9 @@ export function App() {
       setNetworkError(e.message);
     }
   };
+  useEffect(() => {
+    if (state) window.dispatchEvent(new Event("momo:controls-ready"));
+  }, [Boolean(state)]);
   const check = async () => {
     try {
       setConnection(await api("/connection"));
@@ -929,8 +932,8 @@ function Settings({
                 <p>
                   Download only the models you want with{" "}
                   <code>ollama pull MODEL_NAME</code>. Larger models take more
-                  memory and can respond more slowly. There are no cloud AI providers or
-                  paid-provider fallbacks.
+                  memory and can respond more slowly. There are no cloud AI
+                  providers or paid-provider fallbacks.
                 </p>
               </div>
               <label>

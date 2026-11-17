@@ -6,7 +6,10 @@ const { randomUUID } = require("node:crypto");
 let server,
   origin,
   closing = false,
-  mainWindow;
+  allowExit = false,
+  mainWindow,
+  splashWindow,
+  startupHandoff = false;
 const userData = process.env.MOMO_USER_DATA_DIR
   ? path.resolve(process.env.MOMO_USER_DATA_DIR)
   : path.join(app.getPath("appData"), "momo-office");
@@ -16,9 +19,13 @@ const lock = app.requestSingleInstanceLock();
 if (!lock) app.quit();
 app.setAppUserModelId("com.momo.office");
 app.on("second-instance", () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
+  const target =
+    mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()
+      ? mainWindow
+      : splashWindow;
+  if (target && !target.isDestroyed()) {
+    if (target.isMinimized()) target.restore();
+    target.focus();
   }
 });
 const token = randomUUID();
@@ -137,6 +144,79 @@ async function startServer() {
     });
   });
 }
+function startupStatus(message) {
+  if (splashWindow && !splashWindow.isDestroyed())
+    splashWindow.webContents.send("momo:startup-status", message);
+}
+async function createSplash() {
+  splashWindow = new BrowserWindow({
+    title: "Starting Momo Office",
+    width: 460,
+    height: 520,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    frame: false,
+    backgroundColor: "#fff9f1",
+    show: false,
+    icon: path.join(root, "packages/ui/dist/momo-icon.png"),
+    webPreferences: {
+      preload: path.join(__dirname, "splash-preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  splashWindow.removeMenu();
+  splashWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  splashWindow.on("closed", () => {
+    if (!startupHandoff && !closing) app.quit();
+  });
+  await splashWindow.loadFile(path.join(__dirname, "splash.html"));
+  if (!closing && !splashWindow.isDestroyed()) splashWindow.show();
+}
+function createOfficeWindow() {
+  mainWindow = new BrowserWindow({
+    title: "Momo Office",
+    width: 1280,
+    height: 920,
+    minWidth: 760,
+    minHeight: 640,
+    show: false,
+    backgroundColor: "#242335",
+    icon: path.join(root, "packages/ui/dist/momo-icon.png"),
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webviewTag: false,
+      backgroundThrottling: false,
+    },
+  });
+  mainWindow.removeMenu();
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    external(url);
+    return { action: "deny" };
+  });
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith(origin + "/")) {
+      event.preventDefault();
+      external(url);
+    }
+  });
+  mainWindow.webContents.session.setPermissionRequestHandler(
+    (_wc, permission, callback) =>
+      callback(permission === "clipboard-sanitized-write"),
+  );
+  mainWindow.webContents.session.on("will-download", (_event, item) => {
+    item.setSaveDialogOptions({
+      title: "Save your team’s work",
+      defaultPath: path.join(app.getPath("downloads"), item.getFilename()),
+    });
+  });
+}
 if (lock)
   app
     .whenReady()
@@ -145,60 +225,98 @@ if (lock)
         if (event.senderFrame?.url.startsWith(origin + "/"))
           return shell.openPath(dataDirectory());
       });
+      ipcMain.on("momo:cancel-startup", (event) => {
+        if (
+          !closing &&
+          splashWindow &&
+          !splashWindow.isDestroyed() &&
+          event.sender === splashWindow.webContents
+        )
+          app.quit();
+      });
+      await createSplash();
+      if (closing) return;
+      const shownAt = Date.now();
+      startupStatus("Starting your local office…");
       void reuseOllama();
       origin = await startServer();
-      mainWindow = new BrowserWindow({
-        title: "Momo Office",
-        width: 1280,
-        height: 920,
-        minWidth: 760,
-        minHeight: 640,
-        backgroundColor: "#242335",
-        icon: path.join(root, "packages/ui/dist/momo-icon.png"),
-        autoHideMenuBar: true,
-        webPreferences: {
-          preload: path.join(__dirname, "preload.cjs"),
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: true,
-          webviewTag: false,
-        },
-      });
-      mainWindow.removeMenu();
-      mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-        external(url);
-        return { action: "deny" };
-      });
-      mainWindow.webContents.on("will-navigate", (event, url) => {
-        if (!url.startsWith(origin + "/")) {
-          event.preventDefault();
-          external(url);
-        }
-      });
-      mainWindow.webContents.session.setPermissionRequestHandler(
-        (_wc, permission, callback) =>
-          callback(permission === "clipboard-sanitized-write"),
-      );
-      mainWindow.webContents.session.on("will-download", (_event, item) => {
-        item.setSaveDialogOptions({
-          title: "Save your team’s work",
-          defaultPath: path.join(app.getPath("downloads"), item.getFilename()),
+      if (closing) return;
+      startupStatus("Loading the room and your team…");
+      createOfficeWindow();
+      let timer;
+      const officeReady = new Promise((resolve, reject) => {
+        const onReady = (event) => {
+          if (
+            mainWindow &&
+            !mainWindow.isDestroyed() &&
+            event.sender === mainWindow.webContents
+          )
+            resolve();
+        };
+        ipcMain.on("momo:office-ready", onReady);
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                "The office interface did not finish loading. Please reopen the app.",
+              ),
+            ),
+          30000,
+        );
+        mainWindow.once("closed", () => {
+          ipcMain.removeListener("momo:office-ready", onReady);
         });
       });
-      await mainWindow.loadURL(origin);
+      try {
+        await Promise.all([mainWindow.loadURL(origin), officeReady]);
+        // A short, bounded minimum avoids a flashing splash on fast machines.
+        const minimum = Math.min(
+          5000,
+          Math.max(0, Number(process.env.MOMO_SPLASH_MIN_MS) || 900),
+        );
+        const remaining = minimum - (Date.now() - shownAt);
+        if (remaining > 0)
+          await new Promise((resolve) => setTimeout(resolve, remaining));
+        if (closing || mainWindow.isDestroyed()) return;
+        startupHandoff = true;
+        mainWindow.show();
+        mainWindow.webContents.setBackgroundThrottling(true);
+        if (splashWindow && !splashWindow.isDestroyed()) splashWindow.destroy();
+        mainWindow.focus();
+      } finally {
+        clearTimeout(timer);
+        ipcMain.removeAllListeners("momo:office-ready");
+      }
     })
     .catch((error) => {
+      if (closing) return;
       console.error("Momo Office startup error:", error);
       dialog.showErrorBox("Could not open Momo Office", error.message);
-      if (server) server.kill();
       closing = true;
+      allowExit = true;
+      if (server) server.kill();
       app.quit();
     });
 app.on("window-all-closed", () => app.quit());
 app.on("before-quit", (event) => {
-  if (closing || !server || server.exitCode !== null) return;
-  event.preventDefault();
+  if (allowExit) return;
+  if (closing) {
+    event.preventDefault();
+    return;
+  }
   closing = true;
+  if (!server || server.exitCode !== null) {
+    allowExit = true;
+    return;
+  }
+  event.preventDefault();
+  startupStatus("Closing your office…");
+  const finish = () => {
+    if (!allowExit) {
+      allowExit = true;
+      app.quit();
+    }
+  };
   Promise.resolve(
     origin &&
       fetch(`${origin}/api/shutdown`, {
@@ -215,15 +333,15 @@ app.on("before-quit", (event) => {
     .finally(() => {
       const timer = setTimeout(() => {
         server.kill();
-        app.quit();
+        finish();
       }, 6000);
       server.once("exit", () => {
         clearTimeout(timer);
-        app.quit();
+        finish();
       });
       if (server.exitCode !== null) {
         clearTimeout(timer);
-        app.quit();
+        finish();
       }
     });
 });

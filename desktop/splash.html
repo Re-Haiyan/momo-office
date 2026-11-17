@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'"
+    />
+    <title>Starting Momo Office</title>
+    <link rel="stylesheet" href="splash.css" />
+    <script src="splash.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <span class="eyebrow">YOUR LITTLE AI TEAM</span>
+      <img
+        src="../packages/ui/dist/momo-icon.png"
+        alt="Momo the cat office manager"
+        width="170"
+        height="170"
+      />
+      <h1>Momo Office</h1>
+      <p class="subtitle">A cozy space for your next big idea.</p>
+      <div class="loader" role="progressbar" aria-label="Starting Momo Office">
+        <span></span>
+      </div>
+      <p id="startup-status" role="status" aria-live="polite">
+        Getting your office ready…
+      </p>
+      <button id="cancel" type="button">Cancel</button>
+    </main>
+  </body>
+</html>
