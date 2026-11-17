@@ -5,7 +5,7 @@ export async function ollamaComplete(
   messages: { role: string; content: string }[],
   settings: Settings,
   signal: AbortSignal,
-  json = false,
+  json: boolean | object = false,
 ): Promise<string> {
   const combined = AbortSignal.any([signal, AbortSignal.timeout(240000)]);
   const response = await fetch(`${settings.ollamaUrl}/api/chat`, {
@@ -16,7 +16,7 @@ export async function ollamaComplete(
       model: settings.model,
       messages,
       stream: false,
-      ...(json ? { format: "json" } : {}),
+      ...(json ? { format: typeof json === "object" ? json : "json" } : {}),
       options: {
         temperature: 0.35,
         num_ctx: settings.numCtx ?? 8192,
@@ -70,7 +70,7 @@ export class OllamaProvider implements ModelProvider {
         r.messages,
         { ...this.settings(), model: r.model },
         r.signal,
-        r.json,
+        r.schema || r.json,
       ),
       model: r.model,
       family: family(r.model),

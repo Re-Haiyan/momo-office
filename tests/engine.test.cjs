@@ -101,7 +101,7 @@ test("rejects hallucinated teammate IDs without executing a worker", async (t) =
   const result = await settled(engine);
   assert.equal(result.status, "failed");
   assert.match(result.error, /unknown teammate/);
-  assert.equal(calls, 1);
+  assert.equal(calls, 2);
 });
 test("only one queued request reaches the model at a time", async (t) => {
   let active = 0,
@@ -466,3 +466,116 @@ test("review rejection after one revision completes with warnings unless needsIn
 function fsExists(file) {
   return require("node:fs").existsSync(file);
 }
+
+test("plan schema validation retries once with the validation error and enforces earlier dependencies", async (t) => {
+  let planCalls = 0;
+  const schemas = [];
+  const e = fixture(t, async (messages, _settings, _signal, json) => {
+    if (json) {
+      schemas.push(json);
+      if (++planCalls === 1)
+        return JSON.stringify({
+          tasks: [
+            { agentId: "pip", title: "Invalid dependency", dependsOn: [1] },
+          ],
+        });
+      assert.match(
+        messages.at(-1).content,
+        /failed validation:.*earlier task indexes/,
+      );
+      return JSON.stringify({
+        tasks: [{ agentId: "pip", title: "Code", dependsOn: [] }],
+      });
+    }
+    return "proposal";
+  });
+  e.submit("Code");
+  assert.equal((await settled(e)).status, "completed");
+  assert.equal(planCalls, 2);
+  assert.equal(schemas[0].properties.tasks.maxItems, 5);
+});
+test("dependsOn scopes specialist evidence and assemble preserves code verbatim", async (t) => {
+  const code = '```js\nconst exact = "keep me";\n```';
+  let pipCalls = 0;
+  const e = fixture(t, async (messages, _settings, _signal, json) => {
+    if (json)
+      return JSON.stringify({
+        tasks: [
+          { agentId: "pip", title: "First" },
+          { agentId: "luna", title: "Second", dependsOn: [] },
+          { agentId: "pip", title: "Third", dependsOn: [0] },
+        ],
+      });
+    if (messages[0].content.includes("You are Luna")) {
+      assert.ok(!messages[1].content.includes(code));
+      return "Independent prose";
+    }
+    if (messages[0].content.includes("You are Pip")) {
+      if (pipCalls++) {
+        assert.ok(messages[1].content.includes(code));
+        assert.ok(!messages[1].content.includes("Independent prose"));
+      }
+      return code;
+    }
+    return "Short intro";
+  });
+  e.submit("Build");
+  const r = await settled(e);
+  assert.equal(r.status, "completed");
+  assert.ok(r.result.includes(code));
+  assert.ok(r.result.includes("Independent prose"));
+  const {
+    summarizeOutput,
+    validatePlan,
+  } = require("../packages/server/dist/momo/planner");
+  assert.ok(summarizeOutput("x".repeat(5000) + code).includes(code));
+  assert.throws(
+    () =>
+      validatePlan({ tasks: [{ agentId: "pip", title: "", dependsOn: [] }] }, [
+        "pip",
+      ]),
+    /empty title/,
+  );
+});
+test("invalid review booleans retry with actionable validation feedback", async (t) => {
+  let calls = 0;
+  const e = fixture(
+    t,
+    async (_m, _s, _signal, json) =>
+      json
+        ? JSON.stringify({ tasks: [{ agentId: "pip", title: "Work" }] })
+        : "proposal",
+    (messages) => {
+      if (++calls === 1)
+        return JSON.stringify({
+          approved: "yes",
+          needsInput: false,
+          feedback: "bad",
+        });
+      assert.match(messages.at(-1).content, /must both be booleans/);
+      return JSON.stringify({
+        approved: true,
+        needsInput: false,
+        feedback: "ok",
+      });
+    },
+  );
+  e.submit("Work");
+  assert.equal((await settled(e)).status, "completed");
+  assert.equal(calls, 2);
+});
+test("search settings allow only configured local SearXNG and validated providers", () => {
+  const { validateSearch } = require("../packages/server/dist/momo/search");
+  assert.deepEqual(
+    validateSearch({ provider: "searxng", url: "http://127.0.0.1:8888" }),
+    { provider: "searxng", url: "http://127.0.0.1:8888" },
+  );
+  assert.throws(
+    () => validateSearch({ provider: "searxng", url: "https://remote.test" }),
+    /local loopback/,
+  );
+  assert.throws(
+    () => validateSearch({ provider: "arbitrary" }),
+    /Invalid search/,
+  );
+});

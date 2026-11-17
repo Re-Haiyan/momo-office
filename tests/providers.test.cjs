@@ -295,7 +295,7 @@ test("keys never escape provider errors, successful output, snapshots, JSON or M
       json
         ? JSON.stringify(
             messages[0].content.includes("QUALITY_REVIEW")
-              ? { approved: true, feedback: "mock-gemini-secret" }
+              ? { approved: true, needsInput:false, feedback: "mock-gemini-secret" }
               : { tasks: [{ agentId: "pip", title: "mock-groq-secret" }] },
           )
         : "mock-openrouter-secret",

@@ -28,5 +28,7 @@ export function migrate(value: any): Store {
     saved.version = 3;
   }
   saved.settings.numCtx ??= 8192;
+  saved.settings.finalMode ??= "assemble";
+  saved.settings.search ??= { provider: "duckduckgo" };
   return saved;
 }

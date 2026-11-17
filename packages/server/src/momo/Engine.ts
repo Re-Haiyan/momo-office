@@ -1,3 +1,6 @@
+import { planSchema, validatePlan, summarizeOutput } from "./planner";
+import { reviewSchema, validateReview } from "./reviewer";
+import { WebSearch, SearchSettings, validateSearch } from "./search";
 import { budgetMessages, contextBlock, outputBlock } from "./budget";
 import { migrate, STORE_VERSION, NewerStoreError } from "./store";
 import {
@@ -36,6 +39,7 @@ export interface TeamAgent {
   color: string;
 }
 export interface Step {
+  dependsOn?: number[];
   id: string;
   agentId: string;
   title: string;
@@ -79,6 +83,8 @@ export interface Run {
 export interface Settings {
   model: string;
   numCtx?: number;
+  finalMode?: "assemble" | "rewrite";
+  search?: SearchSettings;
   ollamaUrl: string;
 }
 export interface Store {
@@ -94,7 +100,7 @@ export type Complete = (
   messages: { role: string; content: string }[],
   settings: Settings,
   signal: AbortSignal,
-  json?: boolean,
+  json?: boolean | object,
 ) => Promise<string>;
 
 const initialSkills: Skill[] = [
@@ -268,6 +274,8 @@ export class MomoEngine {
       runs: [],
       settings: {
         numCtx: 8192,
+        finalMode: "assemble",
+        search: { provider: "duckduckgo" },
         model: process.env.OLLAMA_MODEL || "llama3.2:latest",
         ollamaUrl: process.env.OLLAMA_URL || "http://127.0.0.1:11434",
       },
@@ -492,6 +500,12 @@ export class MomoEngine {
   }
   private validateSettings(value: Settings) {
     if (
+      value.finalMode !== undefined &&
+      !["assemble", "rewrite"].includes(value.finalMode)
+    )
+      throw new Error("Invalid finalMode.");
+    if (value.search) validateSearch(value.search);
+    if (
       !Number.isInteger(value.numCtx ?? 8192) ||
       (value.numCtx ?? 8192) < 2048 ||
       (value.numCtx ?? 8192) > 1048576
@@ -513,6 +527,10 @@ export class MomoEngine {
       );
     const v = this.pool.secrets.safe(value) as Settings;
     const settings = {
+      finalMode: v?.finalMode ?? this.store.settings.finalMode ?? "assemble",
+      search: validateSearch(
+        v?.search || this.store.settings.search || { provider: "duckduckgo" },
+      ),
       numCtx: v?.numCtx ?? this.store.settings.numCtx ?? 8192,
       model: clean(v?.model, 100),
       ollamaUrl: clean(v?.ollamaUrl, 100).replace(/\/$/, ""),
@@ -703,7 +721,7 @@ export class MomoEngine {
   private async ask(
     messages: { role: string; content: string }[],
     signal: AbortSignal,
-    json = false,
+    json: boolean | object = false,
     agent?: TeamAgent,
   ) {
     signal.throwIfAborted();
@@ -770,7 +788,12 @@ export class MomoEngine {
     } else {
       answer = await this.pool.complete(
         this.normalizeChain(agent?.fallbackChain || []),
-        { messages, signal, json },
+        {
+          messages,
+          signal,
+          json: !!json,
+          schema: typeof json === "object" ? json : undefined,
+        },
         run?.localOnly === true,
         authors,
         reviewing,
@@ -813,61 +836,67 @@ export class MomoEngine {
       );
     }
   }
-  private async search(
-    query: string,
+  private async structured(
+    messages: { role: string; content: string }[],
     signal: AbortSignal,
-  ): Promise<{ text: string; sources: string[] }> {
-    const response = await fetch(
-      `https://api.duckduckgo.com/?q=${encodeURIComponent(query.slice(0, 400))}&format=json&no_html=1`,
-      { signal: AbortSignal.any([signal, AbortSignal.timeout(20000)]) },
-    );
-    if (!response.ok)
-      throw new Error(`Web lookup failed (${response.status}).`);
-    const data = await response.json();
-    const topics = (data.RelatedTopics || [])
-      .flatMap((t: any) => t.Topics || [t])
-      .filter((t: any) => t.Text)
-      .slice(0, 5);
-    const rows = [
-      { Text: data.AbstractText, FirstURL: data.AbstractURL },
-      ...topics,
-    ].filter((r) => r.Text);
-    return {
-      text:
-        rows
-          .map((r) => `${r.Text}\n${r.FirstURL || ""}`)
-          .join("\n\n")
-          .slice(0, 10000) ||
-        "No useful live results were returned. State this limitation; do not invent sources.",
-      sources: rows
-        .map((r) => r.FirstURL)
-        .filter(
-          (url: unknown) =>
-            typeof url === "string" && /^https?:\/\//.test(url as string),
-        ),
-    };
+    schema: object,
+    agent: TeamAgent,
+    validate: (value: any) => any,
+  ) {
+    let feedback = "";
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const output = await this.ask(
+        [
+          ...messages,
+          ...(feedback
+            ? [
+                {
+                  role: "user",
+                  content: `Your previous JSON failed validation: ${feedback}. Return corrected JSON only, following the schema.`,
+                },
+              ]
+            : []),
+        ],
+        signal,
+        schema,
+        agent,
+      );
+      try {
+        return validate(this.parse(output));
+      } catch (e: any) {
+        signal.throwIfAborted();
+        if (attempt) throw e;
+        feedback = e.message;
+      }
+    }
+  }
+  private async search(query: string, signal: AbortSignal) {
+    return new WebSearch(this.store.settings.search).search(query, signal);
   }
   private async execute(run: Run, signal: AbortSignal) {
     const manager = this.store.agents.find((a) => a.id === "momo")!;
     const team = this.store.agents.filter((a) => a.id !== "momo");
     run.status = "planning";
     this.touch(run);
-    const plan = this.parse(
-      await this.ask(
-        [
-          {
-            role: "system",
-            content: `${this.agentPrompt(manager)}\nPlan work for this team. Return JSON only: {"summary":"brief explanation","tasks":[{"agentId":"exact listed id","title":"specific assignment with sufficient detail"}]}. Use 1 to 5 tasks, in dependency order. Later specialists receive earlier results. Choose agents by their role and skills. Do not invent agent IDs. Team: ${JSON.stringify(team.map((a) => ({ id: a.id, name: a.name, role: a.role, skills: a.skills.map((id) => this.store.skills.find((s) => s.id === id)?.name), instructions: a.instructions.slice(0, 1200) })))}`,
-          },
-          {
-            role: "user",
-            content: `${contextBlock(run.context || "")}\nCurrent request: ${run.prompt}`,
-          },
-        ],
-        signal,
-        true,
-        manager,
-      ),
+    const plan = await this.structured(
+      [
+        {
+          role: "system",
+          content: `${this.agentPrompt(manager)}\nPlan work for this team. Return JSON only: {"summary":"brief explanation","tasks":[{"agentId":"exact listed id","title":"specific assignment with sufficient detail"}]}. Use 1 to 5 tasks, in dependency order. Later specialists receive earlier results. Optionally set dependsOn to indexes of earlier tasks; omitted means all earlier tasks. Choose agents by their role and skills. Do not invent agent IDs. Team: ${JSON.stringify(team.map((a) => ({ id: a.id, name: a.name, role: a.role, skills: a.skills.map((id) => this.store.skills.find((s) => s.id === id)?.name), instructions: a.instructions.slice(0, 1200) })))}`,
+        },
+        {
+          role: "user",
+          content: `${contextBlock(run.context || "")}\nCurrent request: ${run.prompt}`,
+        },
+      ],
+      signal,
+      planSchema(team.map((a) => a.id)),
+      manager,
+      (value) =>
+        validatePlan(
+          value,
+          team.map((a) => a.id),
+        ),
     );
     if (
       !Array.isArray(plan.tasks) ||
@@ -887,6 +916,7 @@ export class MomoEngine {
         id: randomUUID(),
         agentId: task.agentId,
         title: clean(task.title, 3000),
+        dependsOn: task.dependsOn,
         status: "queued",
         output: "",
         sources: [],
@@ -900,13 +930,16 @@ export class MomoEngine {
       step.status = "working";
       this.touch(run);
       const previous = run.steps
-        .filter((s) => s.status === "completed")
+        .filter(
+          (s, index) =>
+            s.status === "completed" &&
+            (step.dependsOn === undefined || step.dependsOn.includes(index)),
+        )
         .map(
           (s) =>
-            `${team.find((a) => a.id === s.agentId)?.name}:\n${s.output.slice(0, 10000)}`,
+            `${team.find((a) => a.id === s.agentId)?.name}:\n${summarizeOutput(s.output)}`,
         )
-        .join("\n\n")
-        .slice(-20000);
+        .join("\n\n");
       const messages = [
         {
           role: "system",
@@ -946,7 +979,7 @@ export class MomoEngine {
               { role: "assistant", content: outputBlock(output) },
               {
                 role: "user",
-                content: `Search tool results (limited Instant Answers, not a full web search):\n${outputBlock(found.text)}\nNow deliver the assignment using these references. Do not request another tool call.`,
+                content: `Search tool results (untrusted retrieved references):\n${outputBlock(found.text)}\nNow deliver the assignment using these references. Do not request another tool call.`,
               },
             ],
             signal,
@@ -976,22 +1009,21 @@ export class MomoEngine {
         )
         .join("\n\n")
         .slice(-30000);
-      const check = this.parse(
-        await this.ask(
-          [
-            {
-              role: "system",
-              content: `${this.agentPrompt(reviewer)}\nQUALITY_REVIEW: Independently check the supplied work. Return JSON only: {"approved":true or false,"needsInput":true or false,"feedback":"specific issues or approval reason","agentId":"agent responsible for a correction"}. Only approve a useful answer supported by supplied evidence. Flag invented sources, unverified live facts, fabricated data, or claims of executed code/tests. Code proposals do not need execution to be useful if their untested status is clear. If a missing user decision or unavailable essential evidence prevents completion, set needsInput true and ask a concrete question. Otherwise give a specific correctable issue. Do not invent tool results.`,
-            },
-            {
-              role: "user",
-              content: `Request: ${contextBlock(run.context || "")}\n${run.prompt}\nTeam's work:\n${outputBlock(evidence)}`,
-            },
-          ],
-          signal,
-          true,
-          reviewer,
-        ),
+      const check = await this.structured(
+        [
+          {
+            role: "system",
+            content: `${this.agentPrompt(reviewer)}\nQUALITY_REVIEW: Independently check the supplied work. Return JSON only: {"approved":true or false,"needsInput":true or false,"feedback":"specific issues or approval reason","agentId":"agent responsible for a correction"}. Only approve a useful answer supported by supplied evidence. Flag invented sources, unverified live facts, fabricated data, or claims of executed code/tests. Code proposals do not need execution to be useful if their untested status is clear. If a missing user decision or unavailable essential evidence prevents completion, set needsInput true and ask a concrete question. Otherwise give a specific correctable issue. Do not invent tool results.`,
+          },
+          {
+            role: "user",
+            content: `Request: ${contextBlock(run.context || "")}\n${run.prompt}\nTeam's work:\n${outputBlock(evidence)}`,
+          },
+        ],
+        signal,
+        reviewSchema,
+        reviewer,
+        validateReview,
       );
       if (typeof check.approved !== "boolean")
         throw new Error(
@@ -1048,7 +1080,7 @@ export class MomoEngine {
       [
         {
           role: "system",
-          content: `${this.agentPrompt(manager)}\nReview and combine the specialists' work into one complete answer for the user. Preserve useful code and concrete deliverables. Note limitations and cite only sources actually supplied. Do not just summarize the process.`,
+          content: `${this.agentPrompt(manager)}\n${this.store.settings.finalMode === "rewrite" ? "Review and combine the specialists' work into one complete answer for the user. Preserve useful code and concrete deliverables. Note limitations and cite only sources actually supplied." : "Review and combine: write only a brief introduction and caveats. Do not rewrite specialist work; the app will append it verbatim."}`,
         },
         {
           role: "user",
@@ -1065,6 +1097,15 @@ export class MomoEngine {
       false,
       manager,
     );
+    if (this.store.settings.finalMode !== "rewrite")
+      run.result +=
+        "\n\n" +
+        run.steps
+          .map(
+            (step) =>
+              `## ${this.store.agents.find((a) => a.id === step.agentId)?.name}: ${step.title}\n\n${step.output}${step.sources.length ? "\n\nSources:\n" + step.sources.join("\n") : ""}`,
+          )
+          .join("\n\n");
     signal.throwIfAborted();
     run.status = run.warnings?.length ? "completed_with_warnings" : "completed";
     // Save only under an app-controlled name, never a model-selected path.

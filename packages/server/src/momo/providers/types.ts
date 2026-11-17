@@ -20,6 +20,7 @@ export type Request = {
   model: string;
   signal: AbortSignal;
   json?: boolean;
+  schema?: object;
 };
 export type Answer = { text: string; model: string; family: string };
 export interface ModelProvider {
