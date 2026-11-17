@@ -15,3 +15,4 @@ Phaser, React and other software dependencies retain their respective package li
 | --- | --- | --- |
 | 16×16 office atlas: floors, rugs, walls, doors, windows, furniture, decor and animation frames | Procedurally drawn in `packages/ui/src/game/tileset.ts` | Original Momo Office art; MIT |
 | 16×24 four-direction cat walk/idle/work sheet | Procedurally drawn in `packages/ui/src/game/tileset.ts` | Original Momo Office art; MIT |
+| Seasonal windows, lamp glows, rain and leaf particles | Original code in `tileset.ts` and `Atmosphere.ts` | MIT |

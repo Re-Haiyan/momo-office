@@ -1,3 +1,5 @@
+import {Atmosphere} from "./Atmosphere";
+import {reducedMotion} from "../display";
 import {buildTileOffice,Ambient} from "./TileOffice";
 import {TILE} from "./tileset";
 import { sessionHeaders } from "../session";
@@ -71,12 +73,13 @@ class OfficeScene extends Phaser.Scene {
       }
     }
     this.drawCozyOffice();
+    if(this.ambient)new Atmosphere(this,this.ambient);
     for(const [direction,row] of [['down',0],['left',1],['right',2],['up',3]] as const){
       this.anims.create({key:`cat-walk-${direction}`,frames:[0,1,2,1].map(i=>({key:'pixel-cat',frame:row*5+i})),frameRate:7,repeat:-1});
       this.anims.create({key:`cat-idle-${direction}`,frames:[0,3].map(i=>({key:'pixel-cat',frame:row*5+i})),frameRate:1,repeat:-1});
       this.anims.create({key:`cat-work-${direction}`,frames:[3,4].map(i=>({key:'pixel-cat',frame:row*5+i})),frameRate:3,repeat:-1});
     }
-    this.time.addEvent({delay:650,loop:true,callback:()=>{for(const sprite of this.ambient?.sprites||[]){const type=sprite.getData('ambient');const a=type==='monitor'?TILE.monitor:type==='plant'?TILE.plant:TILE.steam;const b=type==='monitor'?TILE.monitorGlow:type==='plant'?TILE.plantSway:TILE.steamAlt;sprite.setFrame(sprite.frame.name===String(a)?b:a);}}});
+    this.time.addEvent({delay:650,loop:true,callback:()=>{if(reducedMotion())return;for(const sprite of this.ambient?.sprites||[]){const type=sprite.getData('ambient');const a=type==='monitor'?TILE.monitor:type==='plant'?TILE.plant:TILE.steam;const b=type==='monitor'?TILE.monitorGlow:type==='plant'?TILE.plantSway:TILE.steamAlt;sprite.setFrame(sprite.frame.name===String(a)?b:a);}}});
     this.cameras.main.setBackgroundColor("#242335");
     this.fitOffice();
     const resize=()=>this.fitCanvas();window.addEventListener("resize",resize);

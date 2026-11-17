@@ -1,3 +1,4 @@
+import {DisplaySettings} from "./DisplaySettings";
 import { sessionHeaders } from "./session";
 import { Advanced } from "./Advanced";
 import { Providers, ChainEditor, AutoAssign, ModelRef } from "./Providers";
@@ -610,7 +611,7 @@ function Settings({
           </button>
         </div>
         <nav className="tabs">
-          {["team", "skills", "providers", "advanced", "model"].map((t) => (
+          {["team", "skills", "providers", "advanced", "model", "display"].map((t) => (
             <button
               key={t}
               className={t === tab ? "active" : ""}
@@ -622,7 +623,7 @@ function Settings({
                 setError("");
               }}
             >
-              {t === "advanced"
+              {t === "display" ? "Display" : t === "advanced"
                 ? "Advanced"
                 : t === "providers"
                   ? "Providers"
@@ -645,6 +646,7 @@ function Settings({
               {notice}
             </p>
           )}
+          {tab === "display" && <DisplaySettings/>}
           {tab === "providers" && <Providers />}
           {tab === "advanced" && (
             <Advanced settings={state.settings} onSaved={onRefresh} />
