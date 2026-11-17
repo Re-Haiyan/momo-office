@@ -32,7 +32,7 @@ const assert = require("node:assert/strict");
     const url = window.url();
     assert.ok(url.startsWith("http://127.0.0.1:"));
     const state = await (await fetch(url + "api/momo/state")).json();
-    assert.equal(state.agents.length, 5);
+    assert.equal(state.agents.length, 8);
     await app.close();
     app = null;
     assert.ok(fs.existsSync(path.join(temporary, "office/momo-office.json")));
@@ -47,9 +47,37 @@ const assert = require("node:assert/strict");
     console.log(
       "PASS: desktop launches its own local server and UI, renderer has no Node access, fixed data IPC works, saved data exists, server stops with app.",
     );
+  } catch (error) {
+    try {
+      console.error(
+        "Desktop server log:",
+        fs.readFileSync(path.join(temporary, "office/desktop.log"), "utf8"),
+      );
+    } catch {}
+    throw error;
   } finally {
-    if (app) await app.close();
-    fs.rmSync(temporary, { recursive: true, force: true });
+    if (app) {
+      const child = app.process();
+      const timer = setTimeout(() => {
+        if (process.platform === "win32")
+          require("node:child_process").spawnSync("taskkill", [
+            "/pid",
+            String(child.pid),
+            "/T",
+            "/F",
+          ]);
+        else child.kill("SIGKILL");
+      }, 5000);
+      try {
+        await app.close();
+      } catch {
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    try {
+      fs.rmSync(temporary, { recursive: true, force: true });
+    } catch {}
   }
 })().catch((e) => {
   console.error(e);

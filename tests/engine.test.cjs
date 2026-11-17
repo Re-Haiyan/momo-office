@@ -8,14 +8,30 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 async function settled(engine) {
   for (let n = 0; n < 150; n++) {
     const run = engine.snapshot().runs.at(-1);
-    if (["completed", "failed", "cancelled"].includes(run?.status)) return run;
+    if (
+      ["completed", "failed", "cancelled", "needs_input"].includes(run?.status)
+    )
+      return run;
     await wait(10);
   }
   throw Error("run did not settle");
 }
-function fixture(t, complete) {
+function fixture(t, complete, review) {
   const dir = mkdtempSync(path.join(tmpdir(), "momo-test-"));
-  const engine = new MomoEngine(dir, complete);
+  const engine = new MomoEngine(dir, (messages, settings, signal, json) => {
+    if (json && messages[0].content.includes("QUALITY_REVIEW"))
+      return Promise.resolve(
+        review
+          ? review(messages)
+          : JSON.stringify({
+              approved: true,
+              needsInput: false,
+              feedback:
+                "Work is supported and clearly labeled as a proposal where appropriate.",
+            }),
+      );
+    return complete(messages, settings, signal, json);
+  });
   t.after(async () => {
     await engine.shutdown();
     rmSync(dir, { recursive: true, force: true });
@@ -190,4 +206,91 @@ test("all meeting, coffee and reading seats are reachable without crossing walls
       }
       assert.deepEqual(route.at(-1), to);
     }
+});
+
+test("independent review requests a bounded correction before approval", async (t) => {
+  let reviews = 0;
+  const engine = fixture(
+    t,
+    async (messages, _settings, _signal, json) => {
+      if (json)
+        return JSON.stringify({
+          tasks: [{ agentId: "pip", title: "Propose a solution" }],
+        });
+      if (messages[0].content.includes("A teammate reviewed"))
+        return "Proposed code. It has not been executed.";
+      if (messages[0].content.includes("Review and combine"))
+        return "A corrected, untested code proposal.";
+      return "Tests passed and I executed the code.";
+    },
+    (messages) => {
+      reviews++;
+      return JSON.stringify({
+        approved: reviews > 1,
+        needsInput: false,
+        feedback:
+          reviews === 1
+            ? "Remove the unsupported execution claim; label it as an untested proposal."
+            : "Corrected proposal is explicit about its limits.",
+        agentId: "pip",
+      });
+    },
+  );
+  engine.submit("Write a code proposal");
+  const result = await settled(engine);
+  assert.equal(result.status, "completed");
+  assert.equal(reviews, 2);
+  assert.equal(result.review.revisions, 1);
+  assert.match(result.steps[0].output, /not been executed/);
+});
+test("missing evidence pauses for input and a reply carries earlier work forward", async (t) => {
+  let reviews = 0;
+  let planningPrompts = [];
+  const engine = fixture(
+    t,
+    async (messages, _settings, _signal, json) => {
+      if (json) {
+        planningPrompts.push(messages[1].content);
+        return JSON.stringify({
+          tasks: [{ agentId: "atlas", title: "Analyze supplied data" }],
+        });
+      }
+      return "Analysis proposal based only on the supplied numbers.";
+    },
+    () =>
+      JSON.stringify({
+        approved: ++reviews > 1,
+        needsInput: reviews === 1,
+        feedback:
+          reviews === 1
+            ? "Please provide the revenue numbers."
+            : "Data is now available.",
+      }),
+  );
+  const first = engine.submit("Analyze my revenue");
+  let result = await settled(engine);
+  assert.equal(result.status, "needs_input");
+  assert.ok(result.steps[0].output);
+  assert.match(result.result, /revenue numbers/);
+  engine.submit("The revenue numbers are 10 and 20.", first.id);
+  result = await settled(engine);
+  assert.equal(result.status, "completed");
+  assert.match(planningPrompts[1], /Analyze my revenue/);
+  assert.match(planningPrompts[1], /10 and 20/);
+});
+test("transient model failure is retried once and work continues", async (t) => {
+  let attempts = 0;
+  const engine = fixture(t, async (messages, _settings, _signal, json) => {
+    if (json)
+      return JSON.stringify({
+        tasks: [{ agentId: "luna", title: "Write a draft" }],
+      });
+    if (!messages[0].content.includes("Review and combine") && ++attempts === 1)
+      throw new TypeError("fetch failed");
+    return "Recovered draft";
+  });
+  engine.submit("Write a short draft");
+  const result = await settled(engine);
+  assert.equal(result.status, "completed");
+  assert.equal(attempts, 2);
 });

@@ -13,7 +13,7 @@
     "build": "npm run build -w @agent-office/server && npm run build -w @agent-office/ui",
     "start": "node packages/server/dist/index.js",
     "desktop": "electron .",
-    "dist:win": "npm run build && electron-builder --win portable --x64 --config desktop/electron-builder.yml",
+    "dist:win": "npm run build && electron-builder --win portable --x64 --config desktop/electron-builder.yml --publish never",
     "test": "npm run build -w @agent-office/server && node --test tests/engine.test.cjs",
     "test:ui": "node tests/browser.cjs"
   },

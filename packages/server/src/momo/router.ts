@@ -51,7 +51,12 @@ momoRouter.get("/connection", async (_req, res) => {
 });
 momoRouter.post(
   "/runs",
-  action((req) => momo.submit(req.body.prompt)),
+  action((req) =>
+    momo.submit(
+      req.body.prompt,
+      typeof req.body.parentId === "string" ? req.body.parentId : undefined,
+    ),
+  ),
 );
 momoRouter.post(
   "/runs/:id/cancel",

@@ -32,9 +32,19 @@ export interface Run {
     | "planning"
     | "working"
     | "reviewing"
+    | "revising"
+    | "needs_input"
     | "completed"
     | "failed"
     | "cancelled";
+  context?: string;
+  notice?: string;
+  review?: {
+    by: string;
+    feedback: string;
+    approved: boolean;
+    revisions: number;
+  };
   plan: string;
   steps: Step[];
   result: string;
@@ -92,13 +102,33 @@ const initialSkills: Skill[] = [
       "Check the work against the original request. Flag unsupported claims, inconsistencies and missing requirements. Be precise about what is and is not validated.",
   },
 ];
+initialSkills.push(
+  {
+    id: "design",
+    name: "Design & accessibility",
+    instructions:
+      "Propose clear layouts, visual hierarchy, accessible interactions and responsive behavior. Explain design decisions. Treat unmeasured contrast and accessibility compliance as unverified; never claim to have created a design file or run an accessibility audit.",
+  },
+  {
+    id: "analysis",
+    name: "Data analysis",
+    instructions:
+      "Use only supplied data and cited evidence. State definitions, units and assumptions. Show calculation steps and sanity-check arithmetic. Ask for missing data rather than inventing values. Distinguish observations from causal claims; do not claim to have executed analysis code.",
+  },
+  {
+    id: "testing",
+    name: "Testing & verification",
+    instructions:
+      "Review requirements, edge cases, failure paths and contradictions. Propose concrete checks with expected results. Flag unsupported facts, invented citations, and claims that code was executed or tests passed. No execution tool is available, so proposed checks are not completed tests.",
+  },
+);
 const initialAgents: TeamAgent[] = [
   {
     id: "momo",
     name: "Momo",
     role: "Team coordinator",
     instructions:
-      "Understand the user’s goal, delegate to the right specialists, and return one useful final answer. Prefer a small practical plan. Do not invent completed actions.",
+      "Understand the user’s goal, delegate to the right specialists, and return one useful final answer. Prefer a small practical plan. Involve only the teammates needed for this request, not the whole office. Do not invent completed actions.",
     skills: ["planning", "review"],
     webSearch: false,
     color: "#eeaf70",
@@ -143,8 +173,40 @@ const initialAgents: TeamAgent[] = [
     color: "#bdb0e6",
   },
 ];
+initialAgents.push(
+  {
+    id: "coco",
+    name: "Coco",
+    role: "Designer",
+    instructions:
+      "Design practical, coherent interfaces and visual directions. Work with Pip on implementation and Luna on clear interface copy.",
+    skills: ["design", "review"],
+    webSearch: false,
+    color: "#c8ae86",
+  },
+  {
+    id: "atlas",
+    name: "Atlas",
+    role: "Data analyst",
+    instructions:
+      "Analyze numbers and evidence supplied in the prompt or by Sage. Explain methods and uncertainty. Do not invent datasets or results.",
+    skills: ["analysis", "research"],
+    webSearch: false,
+    color: "#81b1b6",
+  },
+  {
+    id: "echo",
+    name: "Echo",
+    role: "Quality reviewer",
+    instructions:
+      "Independently review teammates' work against the user's request. Send specific corrections back to the responsible specialist. Ask for input when missing evidence or constraints prevent a reliable answer.",
+    skills: ["testing", "review"],
+    webSearch: false,
+    color: "#c3b87f",
+  },
+);
 export const terminal = (run: Run) =>
-  ["completed", "failed", "cancelled"].includes(run.status);
+  ["completed", "failed", "cancelled", "needs_input"].includes(run.status);
 const clean = (value: unknown, max: number) =>
   typeof value === "string" ? value.trim().slice(0, max) : "";
 
@@ -168,8 +230,11 @@ export async function ollamaComplete(
     }),
   });
   if (!response.ok)
-    throw new Error(
-      `Ollama returned ${response.status}. Check that ${settings.model} is installed and Ollama is running.`,
+    throw Object.assign(
+      new Error(
+        `Ollama returned ${response.status}. Check that ${settings.model} is installed and Ollama is running.`,
+      ),
+      { retryable: response.status >= 500 || response.status === 429 },
     );
   const data = await response.json();
   if (data.error) throw new Error(data.error);
@@ -330,16 +395,28 @@ export class MomoEngine {
     this.save();
     return skill;
   }
-  submit(prompt: unknown) {
+  submit(prompt: unknown, parentId?: string) {
     const text = clean(prompt, 12000);
     if (!text) throw new Error("Tell Momo what you would like the team to do.");
     if (this.store.runs.filter((r) => !terminal(r)).length >= 5)
       throw new Error(
         "Five requests are already queued. Wait for the team to finish.",
       );
+    const parent = parentId
+      ? this.store.runs.find((r) => r.id === parentId)
+      : undefined;
+    if (parentId && !parent)
+      throw new Error("The earlier request was not found.");
     const run: Run = {
       id: randomUUID(),
       prompt: text,
+      context: parent
+        ? `Earlier request: ${parent.prompt}\nEarlier work and questions: ${parent.result}\n${parent.steps
+            .map((step) => step.output)
+            .join("\n")
+            .slice(-6000)}`.slice(0, 10000)
+        : "",
+      notice: "",
       status: "queued",
       plan: "",
       steps: [],
@@ -418,16 +495,39 @@ export class MomoEngine {
     signal: AbortSignal,
     json = false,
   ) {
-    signal.throwIfAborted();
-    const result = await this.complete(
-      messages,
-      { ...this.store.settings },
-      signal,
-      json,
-    );
-    signal.throwIfAborted();
-    return result;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      signal.throwIfAborted();
+      try {
+        const result = await this.complete(
+          messages,
+          { ...this.store.settings },
+          signal,
+          json,
+        );
+        signal.throwIfAborted();
+        const run = this.store.runs.find((r) => r.id === this.activeRun);
+        if (run?.notice) {
+          run.notice = "";
+          this.touch(run);
+        }
+        return result;
+      } catch (error: any) {
+        signal.throwIfAborted();
+        const temporary =
+          error.name === "TypeError" ||
+          error.name === "TimeoutError" ||
+          error.retryable;
+        if (attempt || !temporary) throw error;
+        const run = this.store.runs.find((r) => r.id === this.activeRun);
+        if (run) {
+          run.notice = "The model was interrupted. Trying this step once more…";
+          this.touch(run);
+        }
+      }
+    }
+    throw new Error("The model did not respond after retrying.");
   }
+
   private parse(text: string) {
     try {
       return JSON.parse(
@@ -488,7 +588,10 @@ export class MomoEngine {
             role: "system",
             content: `${this.agentPrompt(manager)}\nPlan work for this team. Return JSON only: {"summary":"brief explanation","tasks":[{"agentId":"exact listed id","title":"specific assignment with sufficient detail"}]}. Use 1 to 5 tasks, in dependency order. Later specialists receive earlier results. Choose agents by their role and skills. Do not invent agent IDs. Team: ${JSON.stringify(team.map((a) => ({ id: a.id, name: a.name, role: a.role, skills: a.skills.map((id) => this.store.skills.find((s) => s.id === id)?.name), instructions: a.instructions.slice(0, 1200) })))}`,
           },
-          { role: "user", content: run.prompt },
+          {
+            role: "user",
+            content: `${run.context || ""}\nCurrent request: ${run.prompt}`,
+          },
         ],
         signal,
         true,
@@ -539,7 +642,7 @@ export class MomoEngine {
         },
         {
           role: "user",
-          content: `Original request:\n${run.prompt}\nYour assignment:\n${step.title}\nEarlier teammates’ work:\n${previous || "(none)"}`,
+          content: `Original request:\n${run.context || ""}\n${run.prompt}\nYour assignment:\n${step.title}\nEarlier teammates’ work:\n${previous || "(none)"}`,
         },
       ];
       let output = await this.ask(messages, signal);
@@ -584,6 +687,82 @@ export class MomoEngine {
     }
     run.status = "reviewing";
     this.touch(run);
+    const participated = new Set(run.steps.map((step) => step.agentId));
+    const reviewer =
+      team.find((a) => a.id === "echo" && !participated.has(a.id)) ||
+      team.find(
+        (a) => a.skills.includes("review") && !participated.has(a.id),
+      ) ||
+      manager;
+    for (let round = 0; round < 2; round++) {
+      const evidence = run.steps
+        .map(
+          (step) =>
+            `${step.agentId}: ${step.title}\n${step.output}\nActual source URLs: ${step.sources.join(", ") || "(none)"}`,
+        )
+        .join("\n\n")
+        .slice(-30000);
+      const check = this.parse(
+        await this.ask(
+          [
+            {
+              role: "system",
+              content: `${this.agentPrompt(reviewer)}\nQUALITY_REVIEW: Independently check the supplied work. Return JSON only: {"approved":true or false,"needsInput":true or false,"feedback":"specific issues or approval reason","agentId":"agent responsible for a correction"}. Only approve a useful answer supported by supplied evidence. Flag invented sources, unverified live facts, fabricated data, or claims of executed code/tests. Code proposals do not need execution to be useful if their untested status is clear. If a missing user decision or unavailable essential evidence prevents completion, set needsInput true and ask a concrete question. Otherwise give a specific correctable issue. Do not invent tool results.`,
+            },
+            {
+              role: "user",
+              content: `Request: ${run.context || ""}\n${run.prompt}\nTeam's work:\n${evidence}`,
+            },
+          ],
+          signal,
+          true,
+        ),
+      );
+      if (typeof check.approved !== "boolean")
+        throw new Error(
+          "The reviewer returned an invalid check. Retry with a stronger model.",
+        );
+      run.review = {
+        by: reviewer.name,
+        approved: check.approved,
+        feedback:
+          clean(check.feedback, 4000) || "The review did not include details.",
+        revisions: round,
+      };
+      this.touch(run);
+      if (check.approved && !check.needsInput) break;
+      if (check.needsInput || round === 1) {
+        run.status = "needs_input";
+        run.result = `The team needs your input before it can finish reliably.\n\n${run.review.feedback}\n\nReply below with the missing details or evidence. The completed specialist work is preserved under Team progress.`;
+        this.touch(run);
+        return;
+      }
+      const step =
+        run.steps.find((s) => s.agentId === check.agentId) ||
+        run.steps[run.steps.length - 1];
+      const specialist = team.find((a) => a.id === step.agentId)!;
+      run.status = "revising";
+      step.status = "working";
+      this.touch(run);
+      step.output = (
+        await this.ask(
+          [
+            {
+              role: "system",
+              content: `${this.agentPrompt(specialist)}\nA teammate reviewed your work. Correct only the identified issues. Use supplied evidence; if facts or data are missing, say so. Do not invent citations, executions or successful tests. No tools are available during this correction.`,
+            },
+            {
+              role: "user",
+              content: `Original request: ${run.context || ""}\n${run.prompt}\nAssignment: ${step.title}\nEarlier team output:\n${evidence}\n${reviewer.name}'s feedback: ${run.review.feedback}`,
+            },
+          ],
+          signal,
+        )
+      ).slice(0, 24000);
+      step.status = "completed";
+      run.status = "reviewing";
+      this.touch(run);
+    }
     run.result = await this.ask(
       [
         {
@@ -592,7 +771,7 @@ export class MomoEngine {
         },
         {
           role: "user",
-          content: `Original request:\n${run.prompt}\nSpecialist work:\n${run.steps
+          content: `Original request:\n${run.context || ""}\n${run.prompt}\nSpecialist work:\n${run.steps
             .map(
               (s) =>
                 `${team.find((a) => a.id === s.agentId)?.name}:\n${s.output}\nSources: ${s.sources.join(", ")}`,

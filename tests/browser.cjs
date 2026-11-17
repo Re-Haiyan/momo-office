@@ -39,6 +39,13 @@ const mock = http.createServer(async (req, res) => {
         : system.includes("Researcher")
           ? "A portfolio should introduce its owner, demonstrate work with case studies, and offer a clear contact route."
           : "Draft sections: Home, Projects, About and Contact. Keep the writing brief and specific.";
+  if (system.includes("QUALITY_REVIEW"))
+    answer = JSON.stringify({
+      approved: true,
+      needsInput: false,
+      feedback:
+        "The work meets the request and makes no unsupported execution claims.",
+    });
   res.end(JSON.stringify({ message: { content: answer } }));
 });
 (async () => {
@@ -145,7 +152,7 @@ const mock = http.createServer(async (req, res) => {
     .waitFor({ timeout: 15000 });
   assert.ok(await page.getByText(/Your portfolio website plan/).count());
   const state = await (await fetch(origin + "/api/momo/state")).json();
-  assert.equal(state.agents.length, 6);
+  assert.equal(state.agents.length, 9);
   assert.ok(state.skills.some((s) => s.name === "Brand voice"));
   assert.equal(state.runs[0].status, "completed");
   assert.equal(state.runs[0].steps.length, 2);

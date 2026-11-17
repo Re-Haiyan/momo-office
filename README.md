@@ -24,7 +24,10 @@ Your existing AgentOffice folder is not needed to run this app. Keep it as a bac
 - **Sage** — research and evidence.
 - **Pip** — code proposals and debugging.
 - **Luna** — writing and editing.
-- **Nova** — planning and user experience.
+- **Nova** — project planning and dependencies.
+- **Coco** — design and accessibility.
+- **Atlas** — data analysis and assumptions.
+- **Echo** — testing proposals and independent quality review.
 
 Add, rename, edit or remove specialists under **Settings → Teammates**. Up to ten teammates can share the office. Momo stays as the coordinator. One AI call runs at a time, including across multiple queued requests, to avoid loading a separate model for each agent. Up to five requests may be queued.
 
@@ -34,7 +37,7 @@ Example prompt:
 
 > Research the essentials for a portfolio site, write the page copy, and propose a simple implementation plan.
 
-Momo selects one to five assignments in dependency order. Specialist work is visible under **Team progress**. Cancel stops an in-flight request. Retry starts a new run, preserving the earlier run. Final answers can be copied or saved as Markdown.
+Momo selects one to five assignments in dependency order. Specialists receive earlier teammates’ results. Echo independently reviews the work and can request one correction; unresolved issues or missing essential data are marked as needing your input, preserving partial work. Your reply to that request carries the prior context forward. Temporary connection/server failures are retried once, and all model calls have a timeout. These checks reduce errors but do not guarantee factual correctness. Specialist work is visible under **Team progress**. Cancel stops an in-flight request. Retry starts a new run, preserving the earlier run. Final answers can be copied or saved as Markdown.
 
 ## The office and camera
 

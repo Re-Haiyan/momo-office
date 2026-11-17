@@ -25,6 +25,13 @@ type Run = {
   status: string;
   plan: string;
   steps: Step[];
+  notice?: string;
+  review?: {
+    by: string;
+    feedback: string;
+    approved: boolean;
+    revisions: number;
+  };
   result: string;
   error: string;
   createdAt: string;
@@ -37,12 +44,14 @@ type Store = {
 };
 type Connection = { connected: boolean; ready: boolean; models: string[] };
 const done = (run: Run) =>
-  ["completed", "failed", "cancelled"].includes(run.status);
+  ["completed", "failed", "cancelled", "needs_input"].includes(run.status);
 const phase: Record<string, string> = {
   queued: "Waiting for the team",
   planning: "Momo is planning",
   working: "Your team is working",
-  reviewing: "Momo is putting it all together",
+  reviewing: "The team is reviewing the work",
+  revising: "A specialist is making corrections",
+  needs_input: "Momo needs your input",
   completed: "Ready for you",
   failed: "Needs attention",
   cancelled: "Cancelled",
@@ -133,7 +142,11 @@ export function App() {
     setBusy(true);
     setError("");
     try {
-      const result: Run = await api("/runs", "POST", { prompt: text });
+      const result: Run = await api("/runs", "POST", {
+        prompt: text,
+        parentId:
+          run?.status === "needs_input" && text === prompt ? run.id : undefined,
+      });
       setSelected(result.id);
       setPrompt("");
       setCollapsed(false);
@@ -262,6 +275,23 @@ export function App() {
                     ))}
                   </details>
                 )}
+                {run.notice && (
+                  <p className="muted" role="status">
+                    {run.notice}
+                  </p>
+                )}
+                {run.review && (
+                  <details className="team-progress">
+                    <summary>
+                      {run.review.by}'s quality check ·{" "}
+                      {run.review.approved ? "Reviewed" : "Needs attention"}
+                    </summary>
+                    <p>{run.review.feedback}</p>
+                    {run.review.revisions > 0 && (
+                      <p>A specialist revised the work after feedback.</p>
+                    )}
+                  </details>
+                )}
                 {run.result && <pre className="result">{run.result}</pre>}
                 {run.error && (
                   <p className="error" role="alert">
@@ -341,7 +371,11 @@ export function App() {
               ref={promptRef}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="What would you like us to work on?"
+              placeholder={
+                run?.status === "needs_input"
+                  ? "Add the missing details for Momo…"
+                  : "What would you like us to work on?"
+              }
               maxLength={12000}
               rows={2}
               onKeyDown={(e) => {
