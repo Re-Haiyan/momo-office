@@ -43,6 +43,7 @@ type Run = {
   createdAt: string;
 };
 type Store = {
+  notice?: string;
   agents: Agent[];
   skills: Skill[];
   runs: Run[];
@@ -50,7 +51,13 @@ type Store = {
 };
 type Connection = { connected: boolean; ready: boolean; models: string[] };
 const done = (run: Run) =>
-  ["completed", "failed", "cancelled", "needs_input"].includes(run.status);
+  [
+    "completed",
+    "completed_with_warnings",
+    "failed",
+    "cancelled",
+    "needs_input",
+  ].includes(run.status);
 const phase: Record<string, string> = {
   queued: "Waiting for the team",
   planning: "Momo is planning",
@@ -59,6 +66,7 @@ const phase: Record<string, string> = {
   revising: "A specialist is making corrections",
   needs_input: "Momo needs your input",
   completed: "Ready for you",
+  completed_with_warnings: "Ready with warnings",
   failed: "Needs attention",
   cancelled: "Cancelled",
 };
@@ -354,6 +362,11 @@ export function App() {
               </div>
             )}
           </article>
+        )}
+        {state?.notice && (
+          <p className="error" role="status">
+            {state.notice}
+          </p>
         )}
         {run?.warnings?.map((w) => (
           <p key={w} className="error" role="status">

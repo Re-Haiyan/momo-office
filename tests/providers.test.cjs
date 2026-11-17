@@ -328,7 +328,7 @@ test("v1 string model store migrates to provider refs and local fallback without
   }
   fs.writeFileSync(path.join(dir, "momo-office.json"), JSON.stringify(saved));
   e = new MomoEngine(dir, async () => "");
-  assert.equal(e.snapshot().version, 2);
+  assert.equal(e.snapshot().version, 3);
   assert.ok(
     e
       .snapshot()

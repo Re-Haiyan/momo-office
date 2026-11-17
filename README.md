@@ -122,3 +122,9 @@ Release executables are built on Windows CI. Engine and browser integration test
 ## Credits and license
 
 Based on [AgentOffice by Harish Kotra](https://github.com/harishkotra/agent-office), with its MIT license and character sprites retained. Momo's mascot was generated for this project. Momo Office replaces the autonomous demo engine, old floating panels, SQLite tooling and unused packages with a coordinator, serial task queue and compact desktop app. See [LICENSE](LICENSE).
+
+## Reliability upgrades — phase 1
+
+The context budget defaults to `numCtx: 8192`, estimates tokens as characters / 3.5, and reserves completion space. Every model request trims older specialist evidence before older follow-up context; system instructions and the current assignment are protected. Trimming is shown on the run. If protected text alone cannot fit, the request fails with guidance rather than silently losing instructions.
+
+Corrupt saved JSON is copied to `momo-office.corrupt-<timestamp>.json` before a fresh office is created, with a notice in the UI. Stores migrate by version; a newer-version store is never overwritten. Pruning history also removes its Markdown result; startup removes orphan Markdown results. A reviewer can request one revision. Only explicit `needsInput: true` pauses for input; remaining review concerns finish as `completed_with_warnings` and appear in the UI and export.

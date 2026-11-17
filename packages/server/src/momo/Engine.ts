@@ -1,3 +1,5 @@
+import { budgetMessages, contextBlock, outputBlock } from "./budget";
+import { migrate, STORE_VERSION, NewerStoreError } from "./store";
 import {
   ModelRef,
   Trace,
@@ -55,6 +57,7 @@ export interface Run {
     | "reviewing"
     | "revising"
     | "needs_input"
+    | "completed_with_warnings"
     | "completed"
     | "failed"
     | "cancelled";
@@ -75,9 +78,11 @@ export interface Run {
 }
 export interface Settings {
   model: string;
+  numCtx?: number;
   ollamaUrl: string;
 }
 export interface Store {
+  notice?: string;
   version: number;
   providers: Record<CloudId, ProviderSettings>;
   agents: TeamAgent[];
@@ -228,7 +233,13 @@ initialAgents.push(
   },
 );
 export const terminal = (run: Run) =>
-  ["completed", "failed", "cancelled", "needs_input"].includes(run.status);
+  [
+    "completed",
+    "completed_with_warnings",
+    "failed",
+    "cancelled",
+    "needs_input",
+  ].includes(run.status);
 const clean = (value: unknown, max: number) =>
   typeof value === "string" ? value.trim().slice(0, max) : "";
 
@@ -250,53 +261,57 @@ export class MomoEngine {
     fs.mkdirSync(directory, { recursive: true });
     this.file = path.join(directory, "momo-office.json");
     this.store = {
-      version: 2,
+      version: STORE_VERSION,
       providers: defaultProviderSettings(),
       agents: structuredClone(initialAgents),
       skills: structuredClone(initialSkills),
       runs: [],
       settings: {
+        numCtx: 8192,
         model: process.env.OLLAMA_MODEL || "llama3.2:latest",
         ollamaUrl: process.env.OLLAMA_URL || "http://127.0.0.1:11434",
       },
     };
     if (fs.existsSync(this.file)) {
-      const saved = JSON.parse(fs.readFileSync(this.file, "utf8")) as Store;
-      if (
-        ![1, 2].includes(saved.version) ||
-        !Array.isArray(saved.runs) ||
-        !Array.isArray(saved.agents) ||
-        !Array.isArray(saved.skills) ||
-        !saved.settings
-      )
-        throw new Error(
-          "Unrecognized Momo data file. Restore a backup or choose another data directory.",
+      let saved: Store | undefined;
+      try {
+        saved = migrate(JSON.parse(fs.readFileSync(this.file, "utf8")));
+        this.validateSettings(saved.settings);
+      } catch (e) {
+        if (e instanceof NewerStoreError) throw e;
+        const backup = path.join(
+          directory,
+          `momo-office.corrupt-${Date.now()}.json`,
         );
-      this.validateSettings(saved.settings);
-      this.store = saved;
-      this.store.providers = Object.fromEntries(
-        cloudIds.map((id) => [
-          id,
-          { ...defaultProviderSettings()[id], ...saved.providers?.[id] },
-        ]),
-      ) as Store["providers"];
-      for (const a of this.store.agents) {
-        if (typeof a.model === "string")
-          a.model = { provider: "ollama", model: a.model };
-        a.fallbackChain = this.normalizeChain(
-          a.fallbackChain || (a.model ? [a.model] : []),
-        );
-        a.model = a.fallbackChain[0];
+        fs.copyFileSync(this.file, backup, fs.constants.COPYFILE_EXCL);
+        this.store.notice = `Saved data was corrupt. A backup was kept as ${path.basename(backup)}; a fresh office was created.`;
       }
-      this.store.version = 2;
-      for (const run of this.store.runs)
-        if (!terminal(run)) {
-          run.status = "failed";
-          run.error =
-            "The app closed during this request. Retry to start a fresh run.";
-          for (const step of run.steps)
-            if (step.status === "working") step.status = "failed";
+      if (saved) {
+        this.store = saved;
+        this.store.providers = Object.fromEntries(
+          cloudIds.map((id) => [
+            id,
+            { ...defaultProviderSettings()[id], ...saved.providers?.[id] },
+          ]),
+        ) as Store["providers"];
+        for (const a of this.store.agents) {
+          if (typeof a.model === "string")
+            a.model = { provider: "ollama", model: a.model };
+          a.fallbackChain = this.normalizeChain(
+            a.fallbackChain || (a.model ? [a.model] : []),
+          );
+          a.model = a.fallbackChain[0];
         }
+        this.store.version = STORE_VERSION;
+        for (const run of this.store.runs)
+          if (!terminal(run)) {
+            run.status = "failed";
+            run.error =
+              "The app closed during this request. Retry to start a fresh run.";
+            for (const step of run.steps)
+              if (step.status === "working") step.status = "failed";
+          }
+      }
     }
     this.pool = pool || createPool(directory, () => this.store, secrets);
     for (const a of this.store.agents) {
@@ -304,6 +319,7 @@ export class MomoEngine {
       a.model = a.fallbackChain[0];
     }
     this.store = this.pool.secrets.safe(this.store);
+    this.cleanupResults();
     this.save();
   }
   private save() {
@@ -314,6 +330,14 @@ export class MomoEngine {
       "utf8",
     );
     fs.renameSync(temp, this.file);
+  }
+  private cleanupResults() {
+    const directory = path.join(this.directory, "results");
+    if (!fs.existsSync(directory)) return;
+    const keep = new Set(this.store.runs.map((r) => `${r.id}.md`));
+    for (const file of fs.readdirSync(directory))
+      if (file.endsWith(".md") && !keep.has(file))
+        fs.unlinkSync(path.join(directory, file));
   }
   snapshot() {
     return this.pool.secrets.safe(this.store);
@@ -467,6 +491,12 @@ export class MomoEngine {
     return this.snapshot();
   }
   private validateSettings(value: Settings) {
+    if (
+      !Number.isInteger(value.numCtx ?? 8192) ||
+      (value.numCtx ?? 8192) < 2048 ||
+      (value.numCtx ?? 8192) > 1048576
+    )
+      throw new Error("numCtx must be an integer from 2048 to 1048576.");
     if (!/^[a-zA-Z0-9._:/-]{1,100}$/.test(value.model))
       throw new Error("Enter a valid Ollama model name.");
     if (!/^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}$/.test(value.ollamaUrl))
@@ -483,6 +513,7 @@ export class MomoEngine {
       );
     const v = this.pool.secrets.safe(value) as Settings;
     const settings = {
+      numCtx: v?.numCtx ?? this.store.settings.numCtx ?? 8192,
       model: clean(v?.model, 100),
       ollamaUrl: clean(v?.ollamaUrl, 100).replace(/\/$/, ""),
     };
@@ -609,6 +640,7 @@ export class MomoEngine {
       if (index < 0) break;
       this.store.runs.splice(index, 1);
     }
+    this.cleanupResults();
     this.save();
     this.schedule();
     return this.pool.secrets.safe(run);
@@ -677,6 +709,17 @@ export class MomoEngine {
     signal.throwIfAborted();
     messages = this.pool.secrets.safe(messages);
     const run = this.store.runs.find((r) => r.id === this.activeRun);
+    const budget = budgetMessages(
+      messages,
+      this.store.settings.numCtx ?? 8192,
+      2048,
+    );
+    messages = budget.messages;
+    if (budget.trimmed && run) {
+      run.notice =
+        "Older specialist output/context was trimmed to fit the model context budget.";
+      this.touch(run);
+    }
     const reviewing = run?.status === "reviewing";
     const authors = reviewing
       ? run?.steps.flatMap((s) => s.answers || []) || []
@@ -818,7 +861,7 @@ export class MomoEngine {
           },
           {
             role: "user",
-            content: `${run.context || ""}\nCurrent request: ${run.prompt}`,
+            content: `${contextBlock(run.context || "")}\nCurrent request: ${run.prompt}`,
           },
         ],
         signal,
@@ -871,7 +914,7 @@ export class MomoEngine {
         },
         {
           role: "user",
-          content: `Original request:\n${run.context || ""}\n${run.prompt}\nYour assignment:\n${step.title}\nEarlier teammates’ work:\n${previous || "(none)"}`,
+          content: `Original request:\n${contextBlock(run.context || "")}\n${run.prompt}\nYour assignment:\n${step.title}\nEarlier teammates’ work:\n${outputBlock(previous || "(none)")}`,
         },
       ];
       let output = await this.ask(messages, signal, false, agent);
@@ -900,10 +943,10 @@ export class MomoEngine {
           output = await this.ask(
             [
               ...messages,
-              { role: "assistant", content: output },
+              { role: "assistant", content: outputBlock(output) },
               {
                 role: "user",
-                content: `Search tool results (limited Instant Answers, not a full web search):\n${found.text}\nNow deliver the assignment using these references. Do not request another tool call.`,
+                content: `Search tool results (limited Instant Answers, not a full web search):\n${outputBlock(found.text)}\nNow deliver the assignment using these references. Do not request another tool call.`,
               },
             ],
             signal,
@@ -942,7 +985,7 @@ export class MomoEngine {
             },
             {
               role: "user",
-              content: `Request: ${run.context || ""}\n${run.prompt}\nTeam's work:\n${evidence}`,
+              content: `Request: ${contextBlock(run.context || "")}\n${run.prompt}\nTeam's work:\n${outputBlock(evidence)}`,
             },
           ],
           signal,
@@ -963,7 +1006,11 @@ export class MomoEngine {
       };
       this.touch(run);
       if (check.approved && !check.needsInput) break;
-      if (check.needsInput || round === 1) {
+      if (!check.approved && !check.needsInput && round === 1) {
+        (run.warnings ||= []).push(run.review.feedback);
+        break;
+      }
+      if (check.needsInput) {
         run.status = "needs_input";
         run.result = `The team needs your input before it can finish reliably.\n\n${run.review.feedback}\n\nReply below with the missing details or evidence. The completed specialist work is preserved under Team progress.`;
         this.touch(run);
@@ -985,7 +1032,7 @@ export class MomoEngine {
             },
             {
               role: "user",
-              content: `Original request: ${run.context || ""}\n${run.prompt}\nAssignment: ${step.title}\nEarlier team output:\n${evidence}\n${reviewer.name}'s feedback: ${run.review.feedback}`,
+              content: `Original request: ${contextBlock(run.context || "")}\n${run.prompt}\nAssignment: ${step.title}\nEarlier team output:\n${outputBlock(evidence)}\n${reviewer.name}'s feedback: ${run.review.feedback}`,
             },
           ],
           signal,
@@ -1005,10 +1052,10 @@ export class MomoEngine {
         },
         {
           role: "user",
-          content: `Original request:\n${run.context || ""}\n${run.prompt}\nSpecialist work:\n${run.steps
+          content: `Original request:\n${contextBlock(run.context || "")}\n${run.prompt}\nSpecialist work:\n${run.steps
             .map(
               (s) =>
-                `${team.find((a) => a.id === s.agentId)?.name}:\n${s.output}\nSources: ${s.sources.join(", ")}`,
+                `${team.find((a) => a.id === s.agentId)?.name}:\n${outputBlock(s.output)}\nSources: ${s.sources.join(", ")}`,
             )
             .join("\n\n")
             .slice(-50000)}`,
@@ -1019,6 +1066,7 @@ export class MomoEngine {
       manager,
     );
     signal.throwIfAborted();
+    run.status = run.warnings?.length ? "completed_with_warnings" : "completed";
     // Save only under an app-controlled name, never a model-selected path.
     fs.mkdirSync(path.join(this.directory, "results"), { recursive: true });
     fs.writeFileSync(
@@ -1026,12 +1074,11 @@ export class MomoEngine {
       this.markdown(run),
       "utf8",
     );
-    run.status = "completed";
     this.touch(run);
   }
   markdown(run: Run) {
     return this.pool.secrets.redact(
-      `# ${run.prompt}\n\n${run.result || "(No final answer yet.)"}\n\n---\n## Team plan\n${run.plan}\n\n${run.steps.map((s) => `### ${this.store.agents.find((a) => a.id === s.agentId)?.name || s.agentId}: ${s.title}\n\n${s.output}\n${s.sources.length ? "\nSources:\n" + s.sources.join("\n") : ""}`).join("\n\n")}\n\n## Model provenance\n${(run.answers || []).map((a) => `${a.stage} / ${a.agentId}: ${a.provider} / ${a.model}`).join("\n")}\n${(run.warnings || []).join("\n")}`,
+      `# ${run.prompt}\n\nStatus: ${run.status}\n\n${run.result || "(No final answer yet.)"}\n\n---\n## Team plan\n${run.plan}\n\n${run.steps.map((s) => `### ${this.store.agents.find((a) => a.id === s.agentId)?.name || s.agentId}: ${s.title}\n\n${s.output}\n${s.sources.length ? "\nSources:\n" + s.sources.join("\n") : ""}`).join("\n\n")}\n\n## Model provenance\n${(run.answers || []).map((a) => `${a.stage} / ${a.agentId}: ${a.provider} / ${a.model}`).join("\n")}\n${(run.warnings || []).join("\n")}`,
     );
   }
   activity(id: string) {

@@ -17,7 +17,11 @@ export async function ollamaComplete(
       messages,
       stream: false,
       ...(json ? { format: "json" } : {}),
-      options: { temperature: 0.35, num_ctx: 8192, num_predict: 2048 },
+      options: {
+        temperature: 0.35,
+        num_ctx: settings.numCtx ?? 8192,
+        num_predict: 2048,
+      },
     }),
   });
   if (!response.ok)
@@ -55,42 +59,12 @@ export class OllamaProvider implements ModelProvider {
     return ((await r.json()).models || []).map((m: any) => ({
       id: m.name,
       family: family(m.name),
-      contextWindow: 8192,
+      contextWindow: this.settings().numCtx ?? 8192,
       outputLimit: 2048,
       json: true,
     }));
   }
   async complete(r: Request) {
-    let contextWindow = 8192; // Existing request's configured context, never increased silently.
-    try {
-      const metadata = await fetch(`${this.settings().ollamaUrl}/api/show`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: r.model }),
-        signal: AbortSignal.any([r.signal, AbortSignal.timeout(4000)]),
-      });
-      if (metadata.ok) {
-        const data = await metadata.json();
-        const declared = Object.entries(data.model_info || {})
-          .filter(
-            ([key, value]) =>
-              key.endsWith(".context_length") &&
-              typeof value === "number" &&
-              value > 0,
-          )
-          .map(([, value]) => Number(value));
-        if (declared.length) contextWindow = Math.min(8192, ...declared);
-      }
-    } catch {
-      r.signal.throwIfAborted();
-    }
-    budget(r.messages, {
-      id: r.model,
-      family: family(r.model),
-      contextWindow,
-      outputLimit: 2048,
-      json: true,
-    });
     return {
       text: await ollamaComplete(
         r.messages,

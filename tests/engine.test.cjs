@@ -9,7 +9,13 @@ async function settled(engine) {
   for (let n = 0; n < 150; n++) {
     const run = engine.snapshot().runs.at(-1);
     if (
-      ["completed", "failed", "cancelled", "needs_input"].includes(run?.status)
+      [
+        "completed",
+        "completed_with_warnings",
+        "failed",
+        "cancelled",
+        "needs_input",
+      ].includes(run?.status)
     )
       return run;
     await wait(10);
@@ -356,3 +362,107 @@ test("planner, specialist, correction and reviewer use their assigned local mode
     /Invalid provider or model/,
   );
 });
+
+test("budget trims oldest evidence before context and never the system/current assignment", () => {
+  const {
+    budgetMessages,
+    outputBlock,
+    contextBlock,
+  } = require("../packages/server/dist/momo/budget");
+  const input = [
+    { role: "system", content: "SYSTEM KEEP" },
+    {
+      role: "user",
+      content:
+        contextBlock("context ".repeat(600)) +
+        "CURRENT ASSIGNMENT KEEP" +
+        outputBlock("old ".repeat(4000)) +
+        outputBlock("recent evidence"),
+    },
+  ];
+  const b = budgetMessages(input, 4096, 2048);
+  assert.equal(b.trimmed, true);
+  assert.equal(b.messages[0].content, "SYSTEM KEEP");
+  assert.ok(b.messages[1].content.includes("CURRENT ASSIGNMENT KEEP"));
+  assert.ok(b.messages[1].content.includes("recent evidence"));
+  assert.ok(b.tokens <= 4096);
+  assert.ok(input[1].content.length > b.messages[1].content.length);
+  assert.throws(
+    () =>
+      budgetMessages(
+        [{ role: "system", content: "x".repeat(20000) }],
+        2048,
+        2048,
+      ),
+    /system prompt and current assignment/,
+  );
+});
+test("corrupt stores are backed up, version migrations run, newer files never overwritten", async (t) => {
+  const fs = require("node:fs");
+  const dir = mkdtempSync(path.join(tmpdir(), "momo-corrupt-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "momo-office.json");
+  fs.writeFileSync(file, "{bad");
+  const e = new MomoEngine(dir, async () => "");
+  assert.match(e.snapshot().notice, /backup/);
+  const backup = readdirSync(dir).find((f) => f.includes(".corrupt-"));
+  assert.equal(readFileSync(path.join(dir, backup), "utf8"), "{bad");
+  assert.equal(e.snapshot().settings.numCtx, 8192);
+  await e.shutdown();
+  const newer = JSON.stringify({ ...e.snapshot(), version: 999 });
+  fs.writeFileSync(file, newer);
+  assert.throws(() => new MomoEngine(dir, async () => ""), /newer/);
+  assert.equal(readFileSync(file, "utf8"), newer);
+});
+test("startup cleans orphan result Markdown, pruning deletes results for removed runs", async (t) => {
+  const fs = require("node:fs");
+  const e = fixture(t, async (_m, _s, _signal, json) =>
+    json
+      ? JSON.stringify({ tasks: [{ agentId: "pip", title: "Work" }] })
+      : "result",
+  );
+  const r = e.submit("First");
+  await settled(e);
+  const results = path.join(e.directory, "results");
+  assert.ok(fs.existsSync(path.join(results, r.id + ".md")));
+  for (let i = 0; i < 50; i++)
+    e.store.runs.push({
+      ...e.store.runs[0],
+      id: require("node:crypto").randomUUID(),
+    });
+  e.submit("Prune");
+  await settled(e);
+  assert.ok(!fs.existsSync(path.join(results, r.id + ".md")));
+  await e.shutdown();
+  fs.writeFileSync(path.join(results, "orphan.md"), "orphan");
+  fs.writeFileSync(path.join(results, "keep.txt"), "keep");
+  const fresh = new MomoEngine(e.directory, async () => "");
+  assert.ok(!fs.existsSync(path.join(results, "orphan.md")));
+  assert.ok(fs.existsSync(path.join(results, "keep.txt")));
+  await fresh.shutdown();
+});
+test("review rejection after one revision completes with warnings unless needsInput is explicit", async (t) => {
+  const e = fixture(
+    t,
+    async (_m, _s, _signal, json) =>
+      json
+        ? JSON.stringify({ tasks: [{ agentId: "pip", title: "Work" }] })
+        : "proposal",
+    () =>
+      JSON.stringify({
+        approved: false,
+        needsInput: false,
+        feedback: "Check assumptions",
+        agentId: "pip",
+      }),
+  );
+  e.submit("Proposal");
+  const run = await settled(e);
+  assert.equal(run.status, "completed_with_warnings");
+  assert.ok(run.warnings.includes("Check assumptions"));
+  assert.match(e.markdown(run), /completed_with_warnings/);
+  assert.ok(fsExists(path.join(e.directory, "results", run.id + ".md")));
+});
+function fsExists(file) {
+  return require("node:fs").existsSync(file);
+}
